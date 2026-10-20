@@ -1,0 +1,146 @@
+@mode(host.dual)
+
+# robocopy's output: the job header, the directory and file lines, error
+# lines, and the summary table. Pure functions that return text; the
+# counts live in Stats.
+
+const RULE_HEAD: string = "-------------------------------------------------------------------------------";
+const RULE_BODY: string = "------------------------------------------------------------------------------";
+
+# The counts of a job: one row each for directories, files and bytes.
+pub struct Stats {
+    pub var dirs: list[int];    # copied, skipped, mismatch, failed, extras
+    pub var files: list[int];
+    pub var bytes: list[int];
+}
+
+pub const COL_COPIED: int = 0;
+pub const COL_SKIPPED: int = 1;
+pub const COL_MISMATCH: int = 2;
+pub const COL_FAILED: int = 3;
+pub const COL_EXTRAS: int = 4;
+
+pub const ROW_DIRS: int = 0;
+pub const ROW_FILES: int = 1;
+pub const ROW_BYTES: int = 2;
+
+pub func new_stats(): Stats {
+    return Stats(dirs = [0, 0, 0, 0, 0], files = [0, 0, 0, 0, 0], bytes = [0, 0, 0, 0, 0]);
+}
+
+# Adds `amount` to one cell of the table.
+pub func bump(edits s: Stats, which: int, col: int, amount: int): void {
+    if (which == ROW_DIRS) {
+        s.dirs[col] = s.dirs[col] + amount;
+    } else if (which == ROW_FILES) {
+        s.files[col] = s.files[col] + amount;
+    } else {
+        s.bytes[col] = s.bytes[col] + amount;
+    }
+}
+
+# Total = copied + skipped + mismatch + failed (extras are not part of it).
+pub func row_total(row: list[int]): int {
+    return row[COL_COPIED] + row[COL_SKIPPED] + row[COL_MISMATCH] + row[COL_FAILED];
+}
+
+# (Both copy `text` before growing it: in native builds, reassigning a var
+# that still shares a string literal argument can free the literal.)
+pub func lpad(text: string, width: int): string {
+    var out = "" + text;
+    while (out.len() < width) {
+        out = " " + out;
+    }
+    return out;
+}
+
+pub func rpad(text: string, width: int): string {
+    var out = "" + text;
+    while (out.len() < width) {
+        out = out + " ";
+    }
+    return out;
+}
+
+# A directory line: status, the number of files, the path with a final `\`.
+pub func dir_line(status: string, count: int, display: string): string {
+    return "\t" + rpad(status, 11) + lpad(str(count), 9) + "\t" + display;
+}
+
+# A file line: status, size in bytes, name.
+pub func file_line(status: string, size: int, name: string): string {
+    return "\t" + rpad(status, 14) + "\t\t" + lpad(str(size), 8) + "\t" + name;
+}
+
+# The two lines of an error: what failed (with a time stamp) and why.
+pub func error_lines(stamp: string, code: int, action: string, display: string, reason: string): list[string] {
+    let hex = "0x" + lpad(str(code), 8).replace(" ", "0");
+    let prefix = if (stamp.len() > 0) { stamp + " " } else { "" };
+    return [prefix + "ERROR " + str(code) + " (" + hex + ") " + action + " " + display, reason];
+}
+
+func labelled(label: string, values: list[string]): list[string] {
+    var out: list[string] = [];
+    for (k in 0..values.len()) {
+        if (k == 0) {
+            out.push(lpad(label, 9) + " : " + values[k]);
+        } else {
+            out.push("\t    " + values[k]);
+        }
+    }
+    return out;
+}
+
+# The job header (without /NJH).
+pub func header_lines(started: string, source: string, dest: string, patterns: list[string],
+    xf: list[string], xd: list[string], options: list[string]): list[string] {
+    var out: list[string] = ["", RULE_HEAD, "   ROBOCOPY     ::     Robust File Copy (loup-cmd-robocopy)", RULE_HEAD, ""];
+    out.push("  Started : " + started);
+    out.push("   Source : " + source);
+    out.push("     Dest : " + dest);
+    out.push("");
+    for (line in labelled("Files", patterns)) {
+        out.push(line);
+    }
+    for (line in labelled("Exc Files", xf)) {
+        out.push(line);
+    }
+    for (line in labelled("Exc Dirs", xd)) {
+        out.push(line);
+    }
+    out.push("");
+    var words: list[string] = [];
+    for (p in patterns) {
+        words.push(p);
+    }
+    for (o in options) {
+        words.push(o);
+    }
+    out.push("  Options : " + words.join(" "));
+    out.push("");
+    out.push(RULE_BODY);
+    out.push("");
+    return out;
+}
+
+func row(label: string, values: list[int]): string {
+    var line = lpad(label, 8) + " :" + lpad(str(row_total(values)), 10);
+    for (k in 0..5) {
+        line = line + lpad(str(values[k]), 10);
+    }
+    return line;
+}
+
+# The job summary (without /NJS). `elapsed` is the `H:MM:SS` of the job.
+pub func summary_lines(stats: Stats, elapsed: string, ended: string): list[string] {
+    var out: list[string] = ["", RULE_BODY, ""];
+    out.push("               Total    Copied   Skipped  Mismatch    FAILED    Extras");
+    out.push(row("Dirs", stats.dirs));
+    out.push(row("Files", stats.files));
+    out.push(row("Bytes", stats.bytes));
+    out.push("   Times :" + lpad(elapsed, 10) + lpad(elapsed, 10) + lpad("", 20) + lpad("0:00:00", 10)
+        + lpad("0:00:00", 10));
+    out.push("   Ended : " + ended);
+    out.push("");
+    return out;
+}

@@ -1,12 +1,17 @@
-# template Loup commandline application
+# loup-cmd-robocopy
 
-A GitHub template for a command-line application written in
-[Loup](https://code-craft.ai/references/loup). It includes argument parsing,
-command dispatch, a sample `hello` command, tests, a native build and a CI
-workflow.
+The Windows `robocopy` command recreated in [Loup](https://code-craft.ai/references/loup):
+copy and mirror directory trees with a sync planner (plan, then execute),
+a dry run (`/L`), purging of extra files, moves, exclusions, robocopy's job
+header, per-directory log, summary table and bit-mask exit codes, on Linux.
 
-After creating a repository from this template, work through
-[REPOSITORY_TODOS.md](REPOSITORY_TODOS.md).
+Part of the **loup-cmd** series of example applications: classic Linux and
+Windows commands, and projects for each Loup execution mode, each in its own
+repository under [myronccai](https://github.com/myronccai?tab=repositories&q=loup-cmd).
+This one is `host.dual` Loup built as a native binary, and the capstone of
+the Windows set. It uses the shared Windows code in [`source/win/`](source/win/)
+(switch parser, wildcard matcher, path helpers, messages), copied from
+[loup-cmd-type](https://github.com/myronccai/loup-cmd-type).
 
 ## Requirements
 
@@ -14,70 +19,165 @@ After creating a repository from this template, work through
 
   ```sh
   curl -fsSL https://github.com/code-craft-ai-company/loup-releases/releases/latest/download/loup-install.sh | sh
-  loup --version
   ```
 
-- `make`
-- `clang` 17 or later for native builds. Native builds are supported on Linux
-  x86-64 and arm64, and are a preview on macOS and Windows.
+- `make`, and `clang` 17 or later for the native build.
 
 ## Usage
 
 ```sh
-make run ARGS="--help"            # run from source
-make run ARGS="hello Ann --shout"
-make check                        # type-check the program
-make test                         # run the tests in tests/
-make build                        # native binary: build/myapp
-make ci                           # check, test, build and smoke-test the binary
-make clean
+make build                          # native binary: build/robocopy
+make ci                             # check, unit tests, build, end-to-end tests
+make run ARGS="src dst /MIR /L"     # run from source with loup run
 ```
+
+Mirror a site into a backup, leaving out `*.tmp` files (the working
+directory, an absolute path, is shown here as `\home\me\work`):
 
 ```text
-$ build/myapp --help
-usage: myapp [OPTIONS] COMMAND [ARGS...]
+$ build/robocopy site backup /MIR /XF '*.tmp'
 
-A command-line application written in Loup.
+-------------------------------------------------------------------------------
+   ROBOCOPY     ::     Robust File Copy (loup-cmd-robocopy)
+-------------------------------------------------------------------------------
 
-Commands:
-  hello [NAME]          Print a greeting (NAME defaults to 'world')
-  help                  Show this help
+  Started : Tuesday, October 20, 2026 1:05:21 AM
+   Source : \home\me\work\site\
+     Dest : \home\me\work\backup\
 
-Options:
-  -g, --greeting TEXT   Greeting used by 'hello' (default: Hello)
-      --shout           Print the greeting in upper case
-  -v, --verbose         Print diagnostic messages to stderr
-  -h, --help            Show this help and exit
-  -V, --version         Show the version and exit
+    Files : *.*
+Exc Files : *.tmp
+
+  Options : *.* /S /E /PURGE /MIR
+
+------------------------------------------------------------------------------
+
+	  New Dir          1	\home\me\work\site\
+	    New File  		      12	index.html
+100%
+	  New Dir          1	\home\me\work\site\css\
+	    New File  		       7	main.css
+100%
+	  New Dir          0	\home\me\work\site\img\
+	  New Dir          0	\home\me\work\site\img\empty\
+
+------------------------------------------------------------------------------
+
+               Total    Copied   Skipped  Mismatch    FAILED    Extras
+    Dirs :         4         4         0         0         0         0
+   Files :         2         2         0         0         0         0
+   Bytes :        19        19         0         0         0         0
+   Times :   0:00:00   0:00:00                       0:00:00   0:00:00
+   Ended : Tuesday, October 20, 2026 1:05:21 AM
+
 ```
 
-Exit status: `0` success, `1` runtime failure, `2` usage error.
+After `index.html` changes and a stray `old.html` appears in the backup, a
+dry run shows what a mirror would do, and the real run does it:
+
+```text
+$ build/robocopy site backup /MIR /XF '*.tmp' /L /NJH; echo "exit $?"
+	                   1	\home\me\work\site\
+	*EXTRA File   		       4	old.html
+	    Changed   		      15	index.html
+	                   1	\home\me\work\site\css\
+	                   0	\home\me\work\site\img\
+	                   0	\home\me\work\site\img\empty\
+
+------------------------------------------------------------------------------
+
+               Total    Copied   Skipped  Mismatch    FAILED    Extras
+    Dirs :         4         0         4         0         0         0
+   Files :         2         1         1         0         0         1
+   Bytes :        22        15         7         0         0         4
+   Times :   0:00:00   0:00:00                       0:00:00   0:00:00
+   Ended : Tuesday, October 20, 2026 1:05:21 AM
+
+exit 3
+$ build/robocopy site backup /MIR /XF '*.tmp' /NJH /NJS /NDL /NP; echo "exit $?"
+	*EXTRA File   		       4	old.html
+	    Changed   		      15	index.html
+exit 3
+$ build/robocopy site backup /MIR /XF '*.tmp' /NJH /NJS /NDL; echo "exit $?"
+exit 0
+```
+
+## Switches
+
+| Switch | Meaning |
+|---|---|
+| `file ...` | Names or wildcards of the files to copy, after the destination (default `*.*`) |
+| `/S` | Copy subdirectories, except those with no selected file below them |
+| `/E` | Copy subdirectories, including empty ones |
+| `/PURGE` | Delete destination files and directories that are not in the source |
+| `/MIR` | Mirror: `/E` plus `/PURGE` |
+| `/MOV` | Move files: delete each source file once it is copied (or already identical) |
+| `/MOVE` | Move files and directories: also remove source directories left empty (not the source root) |
+| `/XF name ...` | Exclude files by name or wildcard (neither copied nor purged) |
+| `/XD name ...` | Exclude directories by name, wildcard or path |
+| `/L` | List only: report and count everything, change nothing |
+| `/NP` | No `100%` progress line after each copied file |
+| `/NFL`, `/NDL` | No file lines, no directory lines |
+| `/NJH`, `/NJS` | No job header, no job summary |
+| `/?` | Help |
+
+Switches start with `/` or `-`, in any case; `/XF` and `/XD` take every
+following argument up to the next switch. A file "changed" when its size or
+content differs (there are no time stamps to compare). Deleting never
+follows a symbolic link: a link is unlinked, and a directory is emptied
+entry by entry before it is removed.
+
+Exit status, a bit mask: `0` already in sync, `1` files were copied, `2`
+extra files or directories were found (purged or not), `4` mismatches (a
+file where a directory is, or the reverse), `8` some copies, directory
+creations or deletions failed; combinations add up (`3` = copied and
+extras). `16`: a fatal error (bad parameter, no source), nothing was done.
+
+## Differences from the original
+
+- Loup 1.26.0 has no file metadata: "changed" means a different size or
+  content, so both files are read; there are no `Newer`/`Older`/`Tweaked`
+  lines, no `/XO`, `/MAXAGE` or `/MINAGE`, and no attributes, times or
+  security are copied (`/COPY`, `/DCOPY`, `/SEC` are not supported).
+- No retries (`/R`, `/W`): a failure is reported once, as with `/R:0`. No
+  `/MT`, `/LOG`, `/TEE`, `/V`, `/Z`, `/B`.
+- The header names this program instead of Windows and shows the switches
+  given rather than robocopy's defaults; there are no speed lines; sizes
+  are plain byte counts (no `k`/`m`/`g`); the `Times` row shows the job's
+  elapsed time for Total and Copied and `0:00:00` elsewhere; progress is
+  one `100%` line per copied file. Column widths follow robocopy's layout
+  as closely as known.
+- Files inside an extra directory are neither listed nor counted; the
+  directory counts once.
+- Dot-files are copied like any other file (Linux has no hidden attribute).
+- Parameter errors go to standard error without the header; per-file
+  errors are part of the log on standard output.
+- File names are case-sensitive on Linux; wildcards ignore case. Paths are
+  printed absolute, with `\`.
+- An unreadable source file (permissions) stops the program with the
+  toolchain's `IoError` message: a native `IoError` cannot be caught.
+- `/?` prints a short summary written for this project. `--help` and
+  `--version` as the only argument are series conventions.
 
 ## Layout
 
 ```text
-package.lppkg            # Loup manifest
-Makefile                 # run, check, test, build, ci, clean
-source/                  # the application's Loup code
-├── main.loup            # entry point
-├── cli/                 # argument parsing, help text, command dispatch
-└── commands/            # one module per command
-tests/                   # *_test.loup files
-specs/                   # feature specs: requirements, design, tasks
-skills/loup-programmer/  # agent skill for writing Loup
+source/main.loup                 # entry point
+source/appinfo.loup              # name, version, exit bits
+source/cli/args.loup             # robocopy's switches via win.switches, file patterns
+source/cli/usage.loup            # /? and --version text
+source/cli/app.loup              # run(): parse, fatal errors, dispatch
+source/commands/plan.loup        # the sync planner: actions for every directory and file
+source/commands/execute.loup     # carries the plan out: copies, purges, moves, counts
+source/commands/report.loup      # header, log lines, summary table, error lines
+source/commands/robocopy.loup    # run_robocopy: header, plan, execute, summary, exit bits
+source/commands/clock.loup       # times for the header and the summary
+source/commands/fspaths.loup     # current directory, absolute paths
+source/win/                      # shared Windows code: switches, wildcards, paths, messages
+tests/*_test.loup                # unit tests (make test)
+tests/e2e.sh                     # end-to-end tests of build/robocopy (make e2e)
+specs/robocopy/                  # requirements, design, tasks
 ```
 
-[AGENTS.md](AGENTS.md) has the full layout, every build and test command, and
-the steps for adding a command.
-
-## Notes on the toolchain
-
-- On Linux x86-64, `loup` is the self-hosted driver and `loup-bootstrap` is
-  Stage0. `check` and `test` use `loup-bootstrap`; on other platforms both
-  names run the same tool. The Makefile handles this.
-- Modules import each other by their path under `source/`
-  (`from cli.args import (Options);`). Tests import them the same way, which
-  is why `make test` puts `source/` on `LOUPPATH`.
-- The Wasm build (`loup-bootstrap build`) is experimental: modules that use
-  `i"..."` interpolation build but trap at run time, so this template builds
-  native binaries.
+[AGENTS.md](AGENTS.md) has every build and test command and the conventions
+for changing the code.

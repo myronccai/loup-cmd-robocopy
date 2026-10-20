@@ -1,0 +1,220 @@
+@mode(host.dual)
+
+# Carries out a plan (commands/plan.loup): prints each directory and file
+# line, copies, purges and moves, and keeps the counts. With /L it only
+# prints and counts.
+#
+# Deleting is careful because Loup 1.26.0's native removeDir follows
+# symbolic links: a tree is deleted entry by entry, a symbolic link is only
+# ever unlinked, and removeDir is used only on a directory that is already
+# empty. io.fs reports no failures natively, so every change is checked.
+
+from io.fs import (copy, createDir, exists, isDir, isFile, listDir, remove, removeDir);
+from io.proc import (exitCode);
+from win.messages import (MSG_ACCESS_DENIED);
+from win.paths import (display_path, join_path, parent_dir);
+from win.wildcard import (MAX_DEPTH);
+from commands.clock import (now_stamp);
+from commands.fspaths import (absolute_path);
+from commands.plan import (Action, A_DIR_NEW, A_DIR_SAME, A_DIR_MISMATCH, A_DIR_EXTRA, A_FILE_NEW,
+    A_FILE_CHANGED, A_FILE_SAME, A_FILE_MISMATCH, A_FILE_EXTRA);
+from commands.report import (Stats, bump, ROW_DIRS, ROW_FILES, ROW_BYTES, COL_COPIED, COL_SKIPPED,
+    COL_MISMATCH, COL_FAILED, COL_EXTRAS, dir_line, file_line, error_lines);
+
+# What execute() does besides printing (scalars only: cheap to pass).
+pub struct Flags {
+    pub list_only: bool;
+    pub purge: bool;
+    pub move_files: bool;
+    pub no_progress: bool;
+    pub no_file_list: bool;
+    pub no_dir_list: bool;
+    pub cwd: string;
+}
+
+pub func make_flags(list_only: bool, purge: bool, move_files: bool, no_progress: bool,
+    no_file_list: bool, no_dir_list: bool, cwd: string): Flags {
+    return Flags(list_only = list_only, purge = purge, move_files = move_files,
+        no_progress = no_progress, no_file_list = no_file_list, no_dir_list = no_dir_list, cwd = cwd);
+}
+
+# A directory as robocopy shows it: absolute, with `\`, ending in `\`.
+pub func dir_display(path: string, cwd: string): string {
+    let shown = display_path(absolute_path(path, cwd));
+    return if (shown.endsWith("\\")) { shown } else { shown + "\\" };
+}
+
+pub func file_display(path: string, cwd: string): string {
+    return display_path(absolute_path(path, cwd));
+}
+
+# Whether the path itself is a symbolic link (io.fs follows links; `test -h`
+# does not).
+pub func is_symlink(path: string): bool {
+    return exitCode(["test", "-h", path]) == 0;
+}
+
+# Deletes a file, a symbolic link or a whole directory tree without
+# following links. Whether the path is gone afterwards.
+pub func delete_tree(path: string, depth: int): bool {
+    if (isDir(path) and !is_symlink(path)) {
+        if (depth < MAX_DEPTH) {
+            for (name in listDir(path)) {
+                delete_tree(join_path(path, name), depth + 1);
+            }
+        }
+        if (listDir(path).len() == 0) {
+            try {
+                removeDir(path);
+            } catch (Exception as e) {
+                return false;
+            }
+        }
+        return !exists(path);
+    }
+    try {
+        remove(path);
+    } catch (Exception as e) {
+        return false;
+    }
+    return !exists(path);
+}
+
+# Creates a directory (and its parents); whether it exists afterwards.
+pub func make_dir(path: string): bool {
+    if (isDir(path)) {
+        return true;
+    }
+    try {
+        createDir(path);
+    } catch (Exception as e) {
+        return false;
+    }
+    return isDir(path);
+}
+
+# Copies a file of `size` bytes; whether the copy is complete.
+pub func copy_checked(src: string, dst: string, size: int): bool {
+    let parent = parent_dir(dst);
+    if (parent.len() > 0 and !make_dir(parent)) {
+        return false;
+    }
+    if (isDir(dst)) {
+        return false;
+    }
+    try {
+        copy(src, dst);
+    } catch (Exception as e) {
+        return false;
+    }
+    return isFile(dst) and readBytes(dst).len() == size;
+}
+
+func print_all(lines: list[string]): void {
+    for (line in lines) {
+        println(line);
+    }
+}
+
+func report_error(action: string, display: string): void {
+    print_all(error_lines(now_stamp(), 5, action, display, MSG_ACCESS_DENIED));
+}
+
+func count_file(edits stats: Stats, col: int, size: int): void {
+    bump(edits: stats, ROW_FILES, col, 1);
+    bump(edits: stats, ROW_BYTES, col, size);
+}
+
+# Carries out the actions in order, printing robocopy's lines.
+pub func execute(actions: list[Action], flags: Flags, edits stats: Stats): void {
+    let cwd = flags.cwd;
+    let dry = flags.list_only;
+    let show_dirs = !flags.no_dir_list;
+    let show_files = !flags.no_file_list;
+    for (a in actions) {
+        let kind = a.kind;
+        if (kind == A_DIR_NEW) {
+            if (show_dirs) {
+                println(dir_line("  New Dir", a.size, dir_display(a.src, cwd)));
+            }
+            if (dry or make_dir(a.dst)) {
+                bump(edits: stats, ROW_DIRS, COL_COPIED, 1);
+            } else {
+                report_error("Creating Destination Directory", dir_display(a.dst, cwd));
+                bump(edits: stats, ROW_DIRS, COL_FAILED, 1);
+            }
+        } else if (kind == A_DIR_SAME) {
+            if (show_dirs) {
+                println(dir_line("", a.size, dir_display(a.src, cwd)));
+            }
+            bump(edits: stats, ROW_DIRS, COL_SKIPPED, 1);
+        } else if (kind == A_DIR_MISMATCH) {
+            if (show_dirs) {
+                println(dir_line("*MISMATCH", a.size, dir_display(a.src, cwd)));
+            }
+            bump(edits: stats, ROW_DIRS, COL_MISMATCH, 1);
+        } else if (kind == A_DIR_EXTRA) {
+            if (show_dirs) {
+                println(dir_line("*EXTRA Dir", -1, dir_display(a.dst, cwd)));
+            }
+            bump(edits: stats, ROW_DIRS, COL_EXTRAS, 1);
+            if (flags.purge and !dry and !delete_tree(a.dst, 0)) {
+                report_error("Deleting Extra Directory", dir_display(a.dst, cwd));
+            }
+        } else if (kind == A_FILE_EXTRA) {
+            if (show_files) {
+                println(file_line("*EXTRA File", a.size, a.name));
+            }
+            count_file(edits: stats, COL_EXTRAS, a.size);
+            if (flags.purge and !dry and !delete_tree(a.dst, 0)) {
+                report_error("Deleting Extra File", file_display(a.dst, cwd));
+            }
+        } else if (kind == A_FILE_MISMATCH) {
+            if (show_files) {
+                println(file_line("*MISMATCH", a.size, a.name));
+            }
+            count_file(edits: stats, COL_MISMATCH, a.size);
+        } else if (kind == A_FILE_SAME) {
+            count_file(edits: stats, COL_SKIPPED, a.size);
+            if (flags.move_files and !dry) {
+                delete_tree(a.src, 0);
+            }
+        } else {
+            let status = if (kind == A_FILE_NEW) { "    New File" } else { "    Changed" };
+            if (show_files) {
+                println(file_line(status, a.size, a.name));
+            }
+            if (dry) {
+                count_file(edits: stats, COL_COPIED, a.size);
+            } else if (copy_checked(a.src, a.dst, a.size)) {
+                if (show_files and !flags.no_progress) {
+                    println("100%");
+                }
+                count_file(edits: stats, COL_COPIED, a.size);
+                if (flags.move_files and !delete_tree(a.src, 0)) {
+                    report_error("Deleting Source File", file_display(a.src, cwd));
+                }
+            } else {
+                report_error("Copying File", file_display(a.src, cwd));
+                count_file(edits: stats, COL_FAILED, a.size);
+            }
+        }
+    }
+}
+
+# /MOVE: removes the source directories that the move left empty, deepest
+# first. The source root stays.
+pub func remove_moved_dirs(actions: list[Action]): void {
+    var k = actions.len() - 1;
+    while (k > 0) {
+        let a = actions[k];
+        k -= 1;
+        if ((a.kind == A_DIR_NEW or a.kind == A_DIR_SAME) and isDir(a.src) and !is_symlink(a.src)
+            and listDir(a.src).len() == 0) {
+            try {
+                removeDir(a.src);
+            } catch (Exception as e) {
+            }
+        }
+    }
+}

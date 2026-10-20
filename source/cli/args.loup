@@ -1,98 +1,141 @@
 @mode(host.dual)
 
-# Command-line parsing. Loup 1.26 has no CLI library, so arguments are
-# parsed by hand into an Options value.
-#
-# Grammar: [OPTIONS] COMMAND [OPERANDS...]
-#   Options may appear anywhere before `--`; everything after `--` is an
-#   operand. Value options accept `--name VALUE` and `--name=VALUE`.
+# Command-line parsing for robocopy: `robocopy SOURCE DEST [FILE...]
+# [switches]`, with the shared Windows switch parser (win/switches.loup).
+# /XF and /XD take every following argument up to the next switch.
 
-pub const DEFAULT_GREETING: string = "Hello";
+from win.switches import (SwitchArgs, SwitchSpec, flag, list_value, parse_switches, has_switch,
+    switch_values);
 
+pub const MSG_NO_DEST: string = "ERROR : No Destination Directory Specified.";
+
+# Fields are `var` so that tests can adjust default_options().
 pub struct Options {
-    pub command: string;
-    pub operands: list[string];
-    pub help: bool;
-    pub version: bool;
-    pub verbose: bool;
-    pub shout: bool;
-    pub greeting: string;
+    pub var help: bool;
+    pub var version: bool;
+    pub var subdirs: bool;          # /S, /E, /MIR
+    pub var empty_dirs: bool;       # /E, /MIR
+    pub var purge: bool;            # /PURGE, /MIR
+    pub var mirror: bool;           # /MIR (for the Options line)
+    pub var list_only: bool;        # /L
+    pub var move_files: bool;       # /MOV, /MOVE
+    pub var move_dirs: bool;        # /MOVE
+    pub var no_progress: bool;      # /NP
+    pub var no_header: bool;        # /NJH
+    pub var no_summary: bool;       # /NJS
+    pub var no_file_list: bool;     # /NFL
+    pub var no_dir_list: bool;      # /NDL
+    pub var exclude_files: list[string];  # /XF
+    pub var exclude_dirs: list[string];   # /XD
+    pub var operands: list[string]; # SOURCE DEST FILE...
 }
 
-pub func parse_args(argv: list[string]): Result[Options, string] {
-    var command = "";
-    var operands: list[string] = [];
-    var help = false;
-    var version = false;
-    var verbose = false;
-    var shout = false;
-    var greeting = DEFAULT_GREETING;
-    var only_operands = false;
+# Options with robocopy's defaults; for tests.
+pub func default_options(operands: list[string]): Options {
+    let none: list[string] = [];
+    return Options(help = false, version = false, subdirs = false, empty_dirs = false,
+        purge = false, mirror = false, list_only = false, move_files = false, move_dirs = false,
+        no_progress = false, no_header = false, no_summary = false, no_file_list = false,
+        no_dir_list = false, exclude_files = none, exclude_dirs = none, operands = operands);
+}
 
-    var i = 0;
-    while (i < argv.len()) {
-        let arg = argv[i];
-        i += 1;
+# The switches robocopy declares.
+pub func robocopy_switches(): list[SwitchSpec] {
+    return [
+        flag("S"), flag("E"), flag("MIR"), flag("PURGE"), flag("L"), flag("MOV"), flag("MOVE"),
+        flag("NP"), flag("NJH"), flag("NJS"), flag("NFL"), flag("NDL"),
+        list_value("XF"), list_value("XD"),
+    ];
+}
 
-        if (only_operands or arg == "-" or !arg.startsWith("-")) {
-            if (command.is_empty()) {
-                command = arg;
-            } else {
-                operands.push(arg);
-            }
-            continue;
-        }
-        if (arg == "--") {
-            only_operands = true;
-            continue;
-        }
+# robocopy's message for an argument it does not understand; `position`
+# counts from 1 over the whole command line.
+pub func msg_invalid_parameter(position: int, text: string): string {
+    return "ERROR : Invalid Parameter #" + str(position) + " : \"" + text + "\"";
+}
 
-        # Split `--name=value` into its name and inline value.
-        var name = arg;
-        var inline_value: Option[string] = None;
-        if (arg.startsWith("--") and arg.contains("=")) {
-            let parts = arg.split("=");
-            name = parts[0];
-            inline_value = Some(parts.slice(1).join("="));
-        }
-
-        if (name == "-g" or name == "--greeting") {
-            match inline_value {
-                Some(v) => { greeting = v; },
-                None => {
-                    if (i >= argv.len()) {
-                        return Err(i"option '{$ name $}' requires a value");
-                    }
-                    greeting = argv[i];
-                    i += 1;
-                },
-            }
-            continue;
-        }
-
-        if (inline_value.is_some()) {
-            return Err(i"option '{$ name $}' does not take a value");
-        }
-        if (name == "-h" or name == "--help") {
-            help = true;
-        } else if (name == "-V" or name == "--version") {
-            version = true;
-        } else if (name == "-v" or name == "--verbose") {
-            verbose = true;
-        } else if (name == "--shout") {
-            shout = true;
-        } else {
-            return Err(i"unknown option '{$ name $}'");
+func position_of(argv: list[string], text: string): int {
+    for (k in 0..argv.len()) {
+        if (argv[k] == text) {
+            return k + 1;
         }
     }
+    return 0;
+}
 
+# The statement form of `match` (arms that return) is deliberate: a match
+# expression whose arms build new values returns freed memory natively.
+pub func parse_args(argv: list[string]): Result[Options, string] {
+    let parsed = match parse_switches(argv, robocopy_switches()) {
+        Ok(p) => p,
+        Err(e) => {
+            return Err(msg_invalid_parameter(position_of(argv, e.text), e.text));
+        },
+    };
+    # A switch robocopy does not have, or a file name with a path, is an
+    # invalid parameter (operands 3 and later are file names).
+    for (k in 2..parsed.operands.len()) {
+        let op = parsed.operands[k];
+        if (op.startsWith("/") or op.startsWith("-") or op.index_of("\\") >= 0) {
+            return Err(msg_invalid_parameter(position_of(argv, op), op));
+        }
+    }
+    for (sw in parsed.switches) {
+        if ((sw.name == "XF" or sw.name == "XD") and sw.values.len() == 0) {
+            return Err(msg_invalid_parameter(position_of(argv, sw.token), sw.token));
+        }
+    }
+    let mirror = has_switch(parsed, "MIR");
     return Ok(Options(
-        command = command,
-        operands = operands,
-        help = help,
-        version = version,
-        verbose = verbose,
-        shout = shout,
-        greeting = greeting,
+        help = parsed.help,
+        version = parsed.version,
+        subdirs = has_switch(parsed, "S") or has_switch(parsed, "E") or mirror,
+        empty_dirs = has_switch(parsed, "E") or mirror,
+        purge = has_switch(parsed, "PURGE") or mirror,
+        mirror = mirror,
+        list_only = has_switch(parsed, "L"),
+        move_files = has_switch(parsed, "MOV") or has_switch(parsed, "MOVE"),
+        move_dirs = has_switch(parsed, "MOVE"),
+        no_progress = has_switch(parsed, "NP"),
+        no_header = has_switch(parsed, "NJH"),
+        no_summary = has_switch(parsed, "NJS"),
+        no_file_list = has_switch(parsed, "NFL"),
+        no_dir_list = has_switch(parsed, "NDL"),
+        exclude_files = switch_values(parsed, "XF"),
+        exclude_dirs = switch_values(parsed, "XD"),
+        operands = parsed.operands,
     ));
+}
+
+# The file name patterns: operands 3 and later, or `*.*`.
+pub func file_patterns(operands: list[string]): list[string] {
+    var out: list[string] = [];
+    for (k in 2..operands.len()) {
+        out.push(operands[k]);
+    }
+    if (out.len() == 0) {
+        out.push("*.*");
+    }
+    return out;
+}
+
+# The switches as the job header's Options line shows them.
+pub func option_words(opts: Options): list[string] {
+    var out: list[string] = [];
+    if (opts.list_only) { out.push("/L"); }
+    if (opts.subdirs) { out.push("/S"); }
+    if (opts.empty_dirs) { out.push("/E"); }
+    if (opts.move_dirs) {
+        out.push("/MOVE");
+    } else if (opts.move_files) {
+        out.push("/MOV");
+    }
+    if (opts.purge) { out.push("/PURGE"); }
+    if (opts.mirror) { out.push("/MIR"); }
+    if (opts.no_file_list) { out.push("/NFL"); }
+    if (opts.no_dir_list) { out.push("/NDL"); }
+    if (opts.no_progress) { out.push("/NP"); }
+    if (opts.no_header) { out.push("/NJH"); }
+    if (opts.no_summary) { out.push("/NJS"); }
+    return out;
 }

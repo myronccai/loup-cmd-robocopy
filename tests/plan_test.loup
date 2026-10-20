@@ -1,0 +1,109 @@
+@mode(host.dual)
+
+# The sync planner: action kinds and order for a source and destination
+# tree under build/tmp/.
+
+from debug.assert import (expect, expectEq);
+from io.fs import (createDir, writeText, removeDir, isDir);
+from commands.plan import (Action, plan, file_selected, dir_excluded, same_content, has_files,
+    A_DIR_NEW, A_DIR_SAME, A_DIR_MISMATCH, A_DIR_EXTRA, A_FILE_NEW, A_FILE_CHANGED, A_FILE_SAME,
+    A_FILE_MISMATCH, A_FILE_EXTRA);
+
+const ROOT: string = "build/tmp/robocopy_plan";
+
+func fixture(): void {
+    if (isDir(ROOT)) {
+        removeDir(ROOT);
+    }
+    createDir(ROOT + "/src/sub");
+    createDir(ROOT + "/src/empty");
+    createDir(ROOT + "/src/obj");
+    createDir(ROOT + "/dst/old");
+    createDir(ROOT + "/dst/mix");
+    writeText(ROOT + "/src/a.txt", "alpha");
+    writeText(ROOT + "/src/b.txt", "bravo");
+    writeText(ROOT + "/src/c.tmp", "temp");
+    writeText(ROOT + "/src/mix", "a file here");
+    writeText(ROOT + "/src/sub/d.txt", "delta");
+    writeText(ROOT + "/src/obj/o.txt", "object");
+    writeText(ROOT + "/dst/a.txt", "alpha");
+    writeText(ROOT + "/dst/b.txt", "BRAVO");
+    writeText(ROOT + "/dst/x.txt", "extra");
+    writeText(ROOT + "/dst/sub", "a file where a directory belongs");
+}
+
+# One line per action: kind, name (or last path part).
+func describe(actions: list[Action]): string {
+    var out: list[string] = [];
+    for (a in actions) {
+        let path = if (a.src.len() > 0) { a.src } else { a.dst };
+        let name = if (a.name.len() > 0) { a.name } else { path.slice(ROOT.len() + 1) };
+        out.push(str(a.kind) + ":" + name);
+    }
+    return out.join(" ");
+}
+
+func test_filters(): void {
+    let none: list[string] = [];
+    expect(file_selected("a.txt", ["*.*"], none), "*.*");
+    expect(!file_selected("a.tmp", ["*.*"], ["*.TMP"]), "/XF ignores case");
+    expect(!file_selected("a.log", ["*.txt"], none), "pattern");
+    expect(dir_excluded("x/obj", "obj", ["OBJ"], "/w"), "/XD name");
+    expect(dir_excluded("x/obj", "obj", ["/w/x/obj"], "/w"), "/XD path");
+    expect(!dir_excluded("x/obj2", "obj2", ["obj"], "/w"), "other name");
+    expect(same_content(b"ab", b"ab") and !same_content(b"ab", b"ac") and !same_content(b"a", b"ab"), "bytes");
+}
+
+func test_plan_top_level(): void {
+    fixture();
+    let none: list[string] = [];
+    let actions = plan(ROOT + "/src", ROOT + "/dst", ["*.*"], ["*.tmp"], none, false, false, "/w");
+    # The directory, extras (x.txt, old), then the files: a same, b changed, mix mismatch.
+    let want = str(A_DIR_SAME) + ":src " + str(A_FILE_EXTRA) + ":x.txt " + str(A_DIR_EXTRA) + ":old "
+        + str(A_FILE_SAME) + ":a.txt " + str(A_FILE_CHANGED) + ":b.txt " + str(A_FILE_MISMATCH) + ":mix";
+    expectEq(describe(actions), want, "top level");
+    expectEq(actions[0].size, 3, "files in the directory");
+    expectEq(actions[1].size, 5, "extra file size");
+    removeDir(ROOT);
+}
+
+func test_plan_recursive(): void {
+    fixture();
+    let none: list[string] = [];
+    let actions = plan(ROOT + "/src", ROOT + "/new", ["*.txt"], none, ["obj"], true, false, "/w");
+    let want = str(A_DIR_NEW) + ":src " + str(A_FILE_NEW) + ":a.txt " + str(A_FILE_NEW) + ":b.txt "
+        + str(A_DIR_NEW) + ":src/sub " + str(A_FILE_NEW) + ":d.txt";
+    expectEq(describe(actions), want, "/S skips empty and /XD directories");
+    let all = plan(ROOT + "/src", ROOT + "/new", ["*.txt"], none, none, true, true, "/w");
+    expectEq(all.len(), 8, "/E keeps empty and obj");
+    removeDir(ROOT);
+}
+
+func test_plan_mismatched_directory(): void {
+    fixture();
+    let none: list[string] = [];
+    let actions = plan(ROOT + "/src", ROOT + "/dst", ["*.txt"], none, ["obj"], true, false, "/w");
+    let last = actions[actions.len() - 1];
+    expectEq(last.kind, A_DIR_MISMATCH, "a file named like the directory");
+    expectEq(last.dst, ROOT + "/dst/sub", "the destination");
+    removeDir(ROOT);
+}
+
+func test_has_files(): void {
+    fixture();
+    let none: list[string] = [];
+    expect(has_files(ROOT + "/src", ["*.txt"], none, none, "/w", 0), "files");
+    expect(!has_files(ROOT + "/src/empty", ["*.*"], none, none, "/w", 0), "empty");
+    expect(!has_files(ROOT + "/src/obj", ["*.log"], none, none, "/w", 0), "no match");
+    removeDir(ROOT);
+}
+
+func test_destination_inside_source(): void {
+    fixture();
+    let none: list[string] = [];
+    let actions = plan(ROOT + "/src", ROOT + "/src/sub", ["*.*"], none, none, true, true, "/w");
+    for (a in actions) {
+        expect(a.src != ROOT + "/src/sub", "the destination is not walked as a source");
+    }
+    removeDir(ROOT);
+}

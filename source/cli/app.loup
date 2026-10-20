@@ -1,54 +1,43 @@
 @mode(host.dual)
 
-from appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE, EXIT_USAGE);
-from cli.args import (Options, parse_args);
+from appinfo import (EXIT_IN_SYNC, EXIT_FATAL);
+from cli.args import (parse_args, MSG_NO_DEST);
 from cli.usage import (usage, version_line);
-from commands.hello import (run_hello);
+from commands.robocopy import (run_robocopy);
 
-# Parses argv, runs the selected command and returns the exit status.
+# Parses argv, runs robocopy and returns the exit status (the bit mask, or
+# 16 for a fatal error).
 pub func run(argv: list[string]): int {
     let opts = match parse_args(argv) {
         Ok(parsed) => parsed,
         Err(msg) => {
-            return usage_error(msg);
+            printErr(msg);
+            return EXIT_FATAL;
         },
     };
 
     if (opts.help) {
         println(usage());
-        return EXIT_OK;
+        return EXIT_IN_SYNC;
     }
     if (opts.version) {
         println(version_line());
-        return EXIT_OK;
+        return EXIT_IN_SYNC;
     }
-    if (opts.verbose) {
-        printErr(i"{$ APP_NAME $}: command '{$ opts.command $}', operands {$ opts.operands $}");
+    if (opts.operands.len() == 0) {
+        # Like robocopy without arguments: the usage, and a fatal status.
+        println(usage());
+        return EXIT_FATAL;
+    }
+    if (opts.operands.len() == 1) {
+        printErr(MSG_NO_DEST);
+        return EXIT_FATAL;
     }
 
     try {
-        return dispatch(opts);
+        return run_robocopy(opts);
     } catch (Exception as e) {
-        printErr(i"{$ APP_NAME $}: error: {$ e.message $}");
-        return EXIT_FAILURE;
+        printErr(e.message);
+        return EXIT_FATAL;
     }
-}
-
-# Add new commands here and to the help text in cli/usage.loup.
-func dispatch(opts: Options): int {
-    return match opts.command {
-        "hello" => run_hello(opts),
-        "help" => {
-            println(usage());
-            EXIT_OK
-        },
-        "" => usage_error("no command given"),
-        other => usage_error(i"unknown command '{$ other $}'"),
-    };
-}
-
-func usage_error(msg: string): int {
-    printErr(i"{$ APP_NAME $}: {$ msg $}");
-    printErr(i"Try '{$ APP_NAME $} --help' for more information.");
-    return EXIT_USAGE;
 }

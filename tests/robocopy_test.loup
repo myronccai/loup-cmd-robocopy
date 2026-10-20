@@ -1,0 +1,91 @@
+@mode(host.dual)
+
+# Whole runs through run(): the trees they leave and the exit bit masks.
+# These tests print robocopy's normal output.
+
+from debug.assert import (expect, expectEq);
+from io.fs import (createDir, writeText, readText, removeDir, isDir, isFile, exists);
+from appinfo import (EXIT_IN_SYNC, BIT_COPIED, BIT_EXTRAS, BIT_MISMATCH, EXIT_FATAL);
+from cli.app import (run);
+from commands.execute import (delete_tree, make_dir, copy_checked, dir_display);
+from commands.report import (new_stats, bump, ROW_FILES, ROW_DIRS, COL_COPIED, COL_EXTRAS,
+    COL_FAILED, COL_MISMATCH);
+from commands.robocopy import (exit_bits);
+
+const ROOT: string = "build/tmp/robocopy_run";
+
+func fixture(): void {
+    if (isDir(ROOT)) {
+        removeDir(ROOT);
+    }
+    createDir(ROOT + "/src/sub");
+    createDir(ROOT + "/src/empty");
+    writeText(ROOT + "/src/a.txt", "alpha");
+    writeText(ROOT + "/src/sub/b.txt", "bravo");
+}
+
+func test_exit_bits(): void {
+    var s = new_stats();
+    expectEq(exit_bits(s), 0, "nothing");
+    bump(edits: s, ROW_FILES, COL_COPIED, 1);
+    expectEq(exit_bits(s), 1, "copied");
+    bump(edits: s, ROW_DIRS, COL_EXTRAS, 1);
+    expectEq(exit_bits(s), 3, "extras");
+    bump(edits: s, ROW_FILES, COL_MISMATCH, 1);
+    bump(edits: s, ROW_DIRS, COL_FAILED, 1);
+    expectEq(exit_bits(s), 15, "everything");
+}
+
+func test_copy_and_sync(): void {
+    fixture();
+    let src = ROOT + "/src";
+    let dst = ROOT + "/dst";
+    expectEq(run([src, dst, "/E", "/NJH", "/NP"]), BIT_COPIED, "first copy");
+    expect(isDir(dst + "/empty") and readText(dst + "/sub/b.txt") == "bravo", "tree copied");
+    expectEq(run([src, dst, "/E", "/NJH"]), EXIT_IN_SYNC, "in sync");
+    writeText(dst + "/extra.txt", "x");
+    expectEq(run([src, dst, "/E", "/NJH"]), BIT_EXTRAS, "an extra file");
+    expect(isFile(dst + "/extra.txt"), "kept without /PURGE");
+    expectEq(run([src, dst, "/MIR", "/L", "/NJH"]), BIT_EXTRAS, "/L reports");
+    expect(isFile(dst + "/extra.txt"), "/L changes nothing");
+    expectEq(run([src, dst, "/MIR", "/NJH"]), BIT_EXTRAS, "/MIR purges");
+    expect(!exists(dst + "/extra.txt"), "purged");
+    writeText(src + "/a.txt", "ALPHA, changed");
+    expectEq(run([src, dst, "/S", "/NJH", "/NP"]), BIT_COPIED, "changed file");
+    expectEq(readText(dst + "/a.txt"), "ALPHA, changed", "copied again");
+    removeDir(ROOT);
+}
+
+func test_move(): void {
+    fixture();
+    expectEq(run([ROOT + "/src", ROOT + "/moved", "/MOVE", "/S", "/NJH", "/NP"]), BIT_COPIED, "/MOVE");
+    expect(isFile(ROOT + "/moved/sub/b.txt"), "moved");
+    expect(!exists(ROOT + "/src/a.txt") and !exists(ROOT + "/src/sub"), "source emptied");
+    expect(isDir(ROOT + "/src"), "the source root stays");
+    removeDir(ROOT);
+}
+
+func test_mismatch_and_errors(): void {
+    fixture();
+    createDir(ROOT + "/dst/a.txt");
+    expectEq(run([ROOT + "/src", ROOT + "/dst", "/NJH"]), BIT_MISMATCH, "a directory named like a file");
+    expectEq(run([ROOT + "/none", ROOT + "/dst"]), EXIT_FATAL, "missing source");
+    expectEq(run([ROOT + "/src"]), EXIT_FATAL, "no destination");
+    expectEq(run([ROOT + "/src", ROOT + "/dst", "/BAD"]), EXIT_FATAL, "invalid parameter");
+    let none: list[string] = [];
+    expectEq(run(none), EXIT_FATAL, "no arguments");
+    expectEq(run(["/?"]), EXIT_IN_SYNC, "help");
+    removeDir(ROOT);
+}
+
+func test_helpers(): void {
+    fixture();
+    expect(make_dir(ROOT + "/made/deep"), "make_dir");
+    expect(copy_checked(ROOT + "/src/a.txt", ROOT + "/copy/a.txt", 5), "copy with its directory");
+    expect(!copy_checked(ROOT + "/src/a.txt", ROOT + "/made", 5), "not onto a directory");
+    expect(delete_tree(ROOT + "/made", 0), "delete a tree");
+    expect(!exists(ROOT + "/made"), "gone");
+    expectEq(dir_display("a/b", "/w"), "\\w\\a\\b\\", "display");
+    expectEq(dir_display("/", "/w"), "\\", "the root");
+    removeDir(ROOT);
+}

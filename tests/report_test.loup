@@ -1,0 +1,64 @@
+@mode(host.dual)
+
+from debug.assert import (expect, expectEq);
+from commands.report import (Stats, new_stats, bump, row_total, lpad, rpad, dir_line, file_line,
+    error_lines, header_lines, summary_lines, ROW_DIRS, ROW_FILES, ROW_BYTES, COL_COPIED,
+    COL_SKIPPED, COL_EXTRAS);
+from commands.clock import (format_elapsed);
+
+func test_padding(): void {
+    expectEq(lpad("7", 4), "   7", "lpad");
+    expectEq(rpad("ab", 4), "ab  ", "rpad");
+    expectEq(lpad("toolong", 3), "toolong", "no truncation");
+}
+
+func test_lines(): void {
+    expectEq(dir_line("  New Dir", 2, "\\w\\src\\"), "\t  New Dir          2\t\\w\\src\\", "new dir");
+    expectEq(dir_line("", 0, "\\w\\"), "\t                   0\t\\w\\", "existing dir");
+    expectEq(file_line("    New File", 6, "a.txt"), "\t    New File  \t\t       6\ta.txt", "new file");
+    expectEq(file_line("*EXTRA File", 12, "x"), "\t*EXTRA File   \t\t      12\tx", "extra file");
+    let err = error_lines("2026/10/20 01:02:03", 5, "Copying File", "\\w\\a", "Access is denied.");
+    expectEq(err.join("|"), "2026/10/20 01:02:03 ERROR 5 (0x00000005) Copying File \\w\\a|Access is denied.", "error");
+}
+
+func test_stats(): void {
+    var s = new_stats();
+    bump(edits: s, ROW_FILES, COL_COPIED, 2);
+    bump(edits: s, ROW_FILES, COL_SKIPPED, 3);
+    bump(edits: s, ROW_FILES, COL_EXTRAS, 4);
+    bump(edits: s, ROW_BYTES, COL_COPIED, 100);
+    expectEq(row_total(s.files), 5, "extras are not in the total");
+    expectEq(s.bytes[COL_COPIED], 100, "bytes");
+    expectEq(s.dirs[COL_COPIED], 0, "dirs untouched");
+}
+
+func test_header(): void {
+    let none: list[string] = [];
+    let lines = header_lines("now", "\\w\\src\\", "\\w\\dst\\", ["*.txt", "*.log"], ["*.tmp"], none,
+        ["/S", "/E"]);
+    let text = lines.join("\n");
+    expect(text.index_of("  Started : now\n   Source : \\w\\src\\\n     Dest : \\w\\dst\\\n") >= 0, "paths");
+    expect(text.index_of("    Files : *.txt\n\t    *.log\nExc Files : *.tmp\n") >= 0, "patterns");
+    expect(text.index_of("  Options : *.txt *.log /S /E\n") >= 0, "options");
+    expect(text.index_of("Exc Dirs") < 0, "no /XD line");
+}
+
+func test_summary(): void {
+    var s = new_stats();
+    bump(edits: s, ROW_DIRS, COL_COPIED, 1);
+    bump(edits: s, ROW_FILES, COL_COPIED, 2);
+    bump(edits: s, ROW_BYTES, COL_COPIED, 18);
+    let lines = summary_lines(s, "0:00:01", "later");
+    expectEq(lines[3], "               Total    Copied   Skipped  Mismatch    FAILED    Extras", "heading");
+    expectEq(lines[4], "    Dirs :         1         1         0         0         0         0", "dirs");
+    expectEq(lines[5], "   Files :         2         2         0         0         0         0", "files");
+    expectEq(lines[6], "   Bytes :        18        18         0         0         0         0", "bytes");
+    expectEq(lines[7], "   Times :   0:00:01   0:00:01                       0:00:00   0:00:00", "times");
+    expectEq(lines[8], "   Ended : later", "ended");
+}
+
+func test_elapsed(): void {
+    expectEq(format_elapsed(0), "0:00:00", "zero");
+    expectEq(format_elapsed(3725), "1:02:05", "an hour");
+    expectEq(format_elapsed(-5), "0:00:00", "negative");
+}

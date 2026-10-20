@@ -1,0 +1,73 @@
+@mode(host.dual)
+
+# robocopy: plan, then execute. Prints the job header, plans the whole sync
+# (commands/plan.loup), carries it out (commands/execute.loup), prints the
+# summary table and returns the exit bit mask.
+
+from appinfo import (BIT_COPIED, BIT_EXTRAS, BIT_MISMATCH, BIT_FAILED, EXIT_FATAL);
+from cli.args import (Options, file_patterns, option_words);
+from io.fs import (isDir);
+from win.messages import (MSG_FILE_NOT_FOUND);
+from win.paths import (fs_path, strip_trailing_separators);
+from commands.clock import (now_long, now_stamp, now_seconds, format_elapsed);
+from commands.execute import (Flags, make_flags, execute, remove_moved_dirs, dir_display);
+from commands.fspaths import (current_dir);
+from commands.plan import (Action, plan);
+from commands.report import (Stats, new_stats, header_lines, summary_lines, error_lines,
+    COL_COPIED, COL_MISMATCH, COL_FAILED, COL_EXTRAS);
+
+# The exit status for a finished job: 1 files copied, 2 extras, 4
+# mismatches, 8 failures, combined.
+pub func exit_bits(stats: Stats): int {
+    var bits = 0;
+    if (stats.files[COL_COPIED] > 0) {
+        bits = bits | BIT_COPIED;
+    }
+    if (stats.files[COL_EXTRAS] + stats.dirs[COL_EXTRAS] > 0) {
+        bits = bits | BIT_EXTRAS;
+    }
+    if (stats.files[COL_MISMATCH] + stats.dirs[COL_MISMATCH] > 0) {
+        bits = bits | BIT_MISMATCH;
+    }
+    if (stats.files[COL_FAILED] + stats.dirs[COL_FAILED] > 0) {
+        bits = bits | BIT_FAILED;
+    }
+    return bits;
+}
+
+func print_all(lines: list[string]): void {
+    for (line in lines) {
+        println(line);
+    }
+}
+
+pub func run_robocopy(opts: Options): int {
+    let started = now_seconds();
+    let cwd = current_dir();
+    let src = strip_trailing_separators(fs_path(opts.operands[0]));
+    let dst = strip_trailing_separators(fs_path(opts.operands[1]));
+    let patterns = file_patterns(opts.operands);
+    let src_shown = dir_display(src, cwd);
+    if (!opts.no_header) {
+        print_all(header_lines(now_long(), src_shown, dir_display(dst, cwd), patterns,
+            opts.exclude_files, opts.exclude_dirs, option_words(opts)));
+    }
+    if (!isDir(src)) {
+        print_all(error_lines(now_stamp(), 2, "Accessing Source Directory", src_shown, MSG_FILE_NOT_FOUND));
+        return EXIT_FATAL;
+    }
+
+    let actions = plan(src, dst, patterns, opts.exclude_files, opts.exclude_dirs, opts.subdirs,
+        opts.empty_dirs, cwd);
+    let flags = make_flags(opts.list_only, opts.purge, opts.move_files, opts.no_progress,
+        opts.no_file_list, opts.no_dir_list, cwd);
+    var stats = new_stats();
+    execute(actions, flags, edits: stats);
+    if (opts.move_dirs and !opts.list_only) {
+        remove_moved_dirs(actions);
+    }
+    if (!opts.no_summary) {
+        print_all(summary_lines(stats, format_elapsed(now_seconds() - started), now_long()));
+    }
+    return exit_bits(stats);
+}

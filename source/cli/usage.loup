@@ -1,28 +1,36 @@
 @mode(host.dual)
 
-from appinfo import (APP_NAME, APP_VERSION, APP_SUMMARY);
-from cli.args import (DEFAULT_GREETING);
+from appinfo import (APP_NAME, APP_VERSION);
 
+# The text of `robocopy /?`: the syntax and a short line per supported switch.
 pub func usage(): string {
     let lines = [
-        i"usage: {$ APP_NAME $} [OPTIONS] COMMAND [ARGS...]",
+        "Copies and mirrors directory trees.",
         "",
-        APP_SUMMARY,
+        "ROBOCOPY source destination [file [file]...] [options]",
         "",
-        "Commands:",
-        "  hello [NAME]          Print a greeting (NAME defaults to 'world')",
-        "  help                  Show this help",
+        "  file      Names or wildcards of the files to copy (default *.*).",
+        "  /S        Copy subdirectories, except empty ones.",
+        "  /E        Copy subdirectories, including empty ones.",
+        "  /PURGE    Delete destination files and directories that are not in the source.",
+        "  /MIR      Mirror a tree (/E plus /PURGE).",
+        "  /MOV      Move files (delete them from the source once copied).",
+        "  /MOVE     Move files and directories.",
+        "  /XF f...  Exclude files matching these names or wildcards.",
+        "  /XD d...  Exclude directories matching these names or paths.",
+        "  /L        List only: change nothing.",
+        "  /NP       No progress percentage.",
+        "  /NFL      No file list.",
+        "  /NDL      No directory list.",
+        "  /NJH      No job header.",
+        "  /NJS      No job summary.",
         "",
-        "Options:",
-        i"  -g, --greeting TEXT   Greeting used by 'hello' (default: {$ DEFAULT_GREETING $})",
-        "      --shout           Print the greeting in upper case",
-        "  -v, --verbose         Print diagnostic messages to stderr",
-        "  -h, --help            Show this help and exit",
-        "  -V, --version         Show the version and exit",
+        "Exit status: a bit mask: 1 files copied, 2 extra entries, 4 mismatches,",
+        "8 failures; 16 a fatal error.",
     ];
     return lines.join("\n");
 }
 
 pub func version_line(): string {
-    return i"{$ APP_NAME $} {$ APP_VERSION $}";
+    return i"{$ APP_NAME $} (loup-cmd-{$ APP_NAME $}) {$ APP_VERSION $}";
 }

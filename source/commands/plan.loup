@@ -1,0 +1,195 @@
+@mode(host.dual)
+
+# robocopy's sync planner. It compares the source tree with the destination
+# and returns the list of actions, in output order, without changing
+# anything; commands/execute.loup carries them out (or, with /L, only
+# reports them).
+#
+# Per directory: the directory itself (new, existing, or a mismatch when a
+# file has its name in the destination), then the destination's extra files
+# and directories (not in the source), then the source files (new, changed,
+# same, or a mismatch when a directory has the name), then the
+# subdirectories, depth first in name order.
+#
+# Loup 1.26.0 has no file metadata (T1): "changed" means a different size or
+# content, not a newer time stamp, so both files are read.
+
+from io.fs import (isDir, isFile);
+from win.paths import (join_path);
+from win.wildcard import (MATCH_FILES, MAX_DEPTH, list_matches, subdirectories, wild_match);
+from commands.fspaths import (absolute_path, is_within);
+
+pub const A_DIR_NEW: int = 1;        # create the directory
+pub const A_DIR_SAME: int = 2;       # the directory exists
+pub const A_DIR_MISMATCH: int = 3;   # a file stands where the directory belongs
+pub const A_DIR_EXTRA: int = 4;      # a destination directory not in the source
+pub const A_FILE_NEW: int = 5;       # copy: not in the destination
+pub const A_FILE_CHANGED: int = 6;   # copy: different size or content
+pub const A_FILE_SAME: int = 7;      # skip: identical
+pub const A_FILE_MISMATCH: int = 8;  # a directory stands where the file belongs
+pub const A_FILE_EXTRA: int = 9;     # a destination file not in the source
+
+pub struct Action {
+    pub kind: int;
+    pub src: string;     # fs path in the source ("" for extras)
+    pub dst: string;     # fs path in the destination
+    pub name: string;    # the entry's name
+    pub size: int;       # files: bytes; directories: the number of source files (-1 for extras)
+}
+
+func make_action(kind: int, src: string, dst: string, name: string, size: int): Action {
+    return Action(kind = kind, src = src, dst = dst, name = name, size = size);
+}
+
+# Whether a file name is copied: it matches a pattern and no /XF entry.
+pub func file_selected(name: string, patterns: list[string], xf: list[string]): bool {
+    for (x in xf) {
+        if (wild_match(x, name)) {
+            return false;
+        }
+    }
+    for (p in patterns) {
+        if (wild_match(p, name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+# Whether /XD excludes a directory: an entry with a separator names a path,
+# any other entry a name or wildcard.
+pub func dir_excluded(path: string, name: string, xd: list[string], cwd: string): bool {
+    for (x in xd) {
+        if (x.index_of("/") >= 0 or x.index_of("\\") >= 0) {
+            if (absolute_path(x, cwd) == absolute_path(path, cwd)) {
+                return true;
+            }
+        } else if (wild_match(x, name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+# Whether two files have the same bytes.
+pub func same_content(a: bytes, b: bytes): bool {
+    if (a.len() != b.len()) {
+        return false;
+    }
+    for (k in 0..a.len()) {
+        if (a[k] != b[k]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+# Whether a directory holds a selected file anywhere below it (/S skips
+# directories that do not).
+pub func has_files(dir: string, patterns: list[string], xf: list[string], xd: list[string],
+    cwd: string, depth: int): bool {
+    for (name in list_matches(dir, "*", MATCH_FILES)) {
+        if (file_selected(name, patterns, xf)) {
+            return true;
+        }
+    }
+    if (depth >= MAX_DEPTH) {
+        return false;
+    }
+    for (name in subdirectories(dir)) {
+        let sub = join_path(dir, name);
+        if (!dir_excluded(sub, name, xd, cwd) and has_files(sub, patterns, xf, xd, cwd, depth + 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+func contains(names: list[string], name: string): bool {
+    for (n in names) {
+        if (n == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+# Plans one directory pair and, with `recurse`, everything below it.
+# `src_abs` and `dst_abs` are the absolute roots: the destination is never
+# walked as part of the source, and nothing that holds the source is ever
+# an extra.
+func plan_dir(edits actions: list[Action], src: string, dst: string, patterns: list[string],
+    xf: list[string], xd: list[string], recurse: bool, empty_dirs: bool, cwd: string,
+    src_abs: string, dst_abs: string, depth: int): void {
+    var files: list[string] = [];
+    for (name in list_matches(src, "*", MATCH_FILES)) {
+        if (file_selected(name, patterns, xf)) {
+            files.push(name);
+        }
+    }
+    var subs: list[string] = [];
+    for (name in subdirectories(src)) {
+        let path = join_path(src, name);
+        if (!dir_excluded(path, name, xd, cwd) and absolute_path(path, cwd) != dst_abs) {
+            subs.push(name);
+        }
+    }
+    let dst_is_dir = isDir(dst);
+    if (!dst_is_dir and isFile(dst)) {
+        actions.push(make_action(A_DIR_MISMATCH, src, dst, "", files.len()));
+        return;
+    }
+    let dir_kind = if (dst_is_dir) { A_DIR_SAME } else { A_DIR_NEW };
+    actions.push(make_action(dir_kind, src, dst, "", files.len()));
+
+    if (dst_is_dir) {
+        for (name in list_matches(dst, "*", MATCH_FILES)) {
+            if (file_selected(name, patterns, xf) and !contains(files, name) and !contains(subs, name)) {
+                let path = join_path(dst, name);
+                actions.push(make_action(A_FILE_EXTRA, "", path, name, readBytes(path).len()));
+            }
+        }
+        for (name in subdirectories(dst)) {
+            let path = join_path(dst, name);
+            let keep = contains(subs, name) or contains(files, name) or dir_excluded(path, name, xd, cwd)
+                or is_within(src_abs, absolute_path(path, cwd));
+            if (!keep) {
+                actions.push(make_action(A_DIR_EXTRA, "", path, name, -1));
+            }
+        }
+    }
+
+    for (name in files) {
+        let s = join_path(src, name);
+        let d = join_path(dst, name);
+        let data = readBytes(s);
+        var kind = A_FILE_NEW;
+        if (dst_is_dir and isDir(d)) {
+            kind = A_FILE_MISMATCH;
+        } else if (dst_is_dir and isFile(d)) {
+            kind = if (same_content(data, readBytes(d))) { A_FILE_SAME } else { A_FILE_CHANGED };
+        }
+        actions.push(make_action(kind, s, d, name, data.len()));
+    }
+
+    if (!recurse or depth >= MAX_DEPTH) {
+        return;
+    }
+    for (name in subs) {
+        let s = join_path(src, name);
+        if (empty_dirs or has_files(s, patterns, xf, xd, cwd, depth + 1)) {
+            plan_dir(edits: actions, s, join_path(dst, name), patterns, xf, xd, recurse, empty_dirs,
+                cwd, src_abs, dst_abs, depth + 1);
+        }
+    }
+}
+
+# The actions that bring `dst` in line with `src` (both fs paths of
+# directories; `dst` need not exist). `cwd` resolves relative paths.
+pub func plan(src: string, dst: string, patterns: list[string], xf: list[string], xd: list[string],
+    recurse: bool, empty_dirs: bool, cwd: string): list[Action] {
+    var actions: list[Action] = [];
+    plan_dir(edits: actions, src, dst, patterns, xf, xd, recurse, empty_dirs, cwd,
+        absolute_path(src, cwd), absolute_path(dst, cwd), 0);
+    return actions;
+}

@@ -1,0 +1,41 @@
+@mode(host.dual)
+
+# Wall-clock times for the job header (`Started :`, `Ended :`), the
+# `Times :` row and the time stamps of error lines. They come from the
+# `date` command through io.proc, which works the same in every Loup lane.
+
+from io.proc import (output);
+from win.switches import (parse_int_value);
+
+func run_date(format: string): string {
+    var text = output(["date", format]);
+    while (text.endsWith("\n") or text.endsWith("\r")) {
+        text = text.slice(0, text.len() - 1);
+    }
+    return text;
+}
+
+# The local date and time in a long form: `Tuesday, October 20, 2026 9:41:02 AM`.
+pub func now_long(): string {
+    return run_date("+%A, %B %-d, %Y %-I:%M:%S %p");
+}
+
+# The time stamp of an error line: `2026/10/20 09:41:02`.
+pub func now_stamp(): string {
+    return run_date("+%Y/%m/%d %H:%M:%S");
+}
+
+# Seconds since 1970 (0 if unknown).
+pub func now_seconds(): int {
+    return parse_int_value(run_date("+%s")) ?? 0;
+}
+
+func two_digits(n: int): string {
+    return if (n < 10) { "0" + str(n) } else { str(n) };
+}
+
+# An elapsed time as robocopy shows it: `H:MM:SS`.
+pub func format_elapsed(seconds: int): string {
+    let s = if (seconds < 0) { 0 } else { seconds };
+    return str(s / 3600) + ":" + two_digits((s / 60) % 60) + ":" + two_digits(s % 60);
+}
