@@ -3,6 +3,9 @@
 # Command-line parsing for robocopy: `robocopy SOURCE DEST [FILE...]
 # [switches]`, with the shared Windows switch parser (win/switches.loup).
 # /XF and /XD take every following argument up to the next switch.
+#
+# Runtime: host.dual. Compiled into the native binary build/robocopy by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 from win.switches import (SwitchArgs, SwitchSpec, flag, list_value, parse_switches, has_switch,
     switch_values);

@@ -3,6 +3,9 @@
 # robocopy's output: the job header, the directory and file lines, error
 # lines, and the summary table. Pure functions that return text; the
 # counts live in Stats.
+#
+# Runtime: host.dual. Compiled into the native binary build/robocopy by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 const RULE_HEAD: string = "-------------------------------------------------------------------------------";
 const RULE_BODY: string = "------------------------------------------------------------------------------";

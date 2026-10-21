@@ -13,6 +13,13 @@
 #
 # Loup 1.26.0 has no file metadata (T1): "changed" means a different size or
 # content, not a newer time stamp, so both files are read.
+#
+# Runtime: host.dual. Compiled into the native binary build/robocopy by `make
+# build`; `loup run source/main.loup` interprets the same code.
+#
+# Structure: the action kinds and the Action record; the selection tests (/XF,
+# /XD, has_files); plan_dir, which plans one directory pair in the order above
+# and recurses; and plan, the entry point.
 
 from io.fs import (isDir, isFile);
 from win.paths import (join_path);
@@ -142,6 +149,9 @@ func plan_dir(edits actions: list[Action], src: string, dst: string, patterns: l
     let dir_kind = if (dst_is_dir) { A_DIR_SAME } else { A_DIR_NEW };
     actions.push(make_action(dir_kind, src, dst, "", files.len()));
 
+    # Extras: destination entries the source does not have (what /PURGE
+    # deletes). Excluded directories and the ones that hold the source are
+    # kept.
     if (dst_is_dir) {
         for (name in list_matches(dst, "*", MATCH_FILES)) {
             if (file_selected(name, patterns, xf) and !contains(files, name) and !contains(subs, name)) {
@@ -159,6 +169,7 @@ func plan_dir(edits actions: list[Action], src: string, dst: string, patterns: l
         }
     }
 
+    # The source files, compared by content with the destination's.
     for (name in files) {
         let s = join_path(src, name);
         let d = join_path(dst, name);
@@ -172,6 +183,8 @@ func plan_dir(edits actions: list[Action], src: string, dst: string, patterns: l
         actions.push(make_action(kind, s, d, name, data.len()));
     }
 
+    # The subdirectories, depth first. Without /E, a subdirectory that holds
+    # no selected file anywhere below it is left out.
     if (!recurse or depth >= MAX_DEPTH) {
         return;
     }

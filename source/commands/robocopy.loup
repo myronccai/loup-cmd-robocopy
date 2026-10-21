@@ -3,6 +3,9 @@
 # robocopy: plan, then execute. Prints the job header, plans the whole sync
 # (commands/plan.loup), carries it out (commands/execute.loup), prints the
 # summary table and returns the exit bit mask.
+#
+# Runtime: host.dual. Compiled into the native binary build/robocopy by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 from appinfo import (BIT_COPIED, BIT_EXTRAS, BIT_MISMATCH, BIT_FAILED, EXIT_FATAL);
 from cli.args import (Options, file_patterns, option_words);

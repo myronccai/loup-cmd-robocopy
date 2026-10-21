@@ -1,5 +1,13 @@
 @mode(host.dual)
 
+# Unit tests for robocopy's output (commands.report and
+# commands.clock.format_elapsed): padding, directory, file and error
+# lines, the counts, the header and the summary table.
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this file
+# with Stage0 (`loup-bootstrap test --no-parallel`, source/ on LOUPPATH), one
+# test per `func test_*()`. It is not part of the binary.
+
 from debug.assert import (expect, expectEq);
 from commands.report import (Stats, new_stats, bump, row_total, lpad, rpad, dir_line, file_line,
     error_lines, header_lines, summary_lines, ROW_DIRS, ROW_FILES, ROW_BYTES, COL_COPIED,

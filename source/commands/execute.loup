@@ -8,6 +8,13 @@
 # symbolic links: a tree is deleted entry by entry, a symbolic link is only
 # ever unlinked, and removeDir is used only on a directory that is already
 # empty. io.fs reports no failures natively, so every change is checked.
+#
+# Runtime: host.dual. Compiled into the native binary build/robocopy by `make
+# build`; `loup run source/main.loup` interprets the same code.
+#
+# Structure: Flags; display forms of paths; the checked file-system operations
+# (delete_tree, make_dir, copy_checked); error and counting helpers; execute,
+# one branch per action kind; and remove_moved_dirs for /MOVE.
 
 from io.fs import (copy, createDir, exists, isDir, isFile, listDir, remove, removeDir);
 from io.proc import (exitCode);

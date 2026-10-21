@@ -3,6 +3,9 @@
 # Wall-clock times for the job header (`Started :`, `Ended :`), the
 # `Times :` row and the time stamps of error lines. They come from the
 # `date` command through io.proc, which works the same in every Loup lane.
+#
+# Runtime: host.dual. Compiled into the native binary build/robocopy by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 from io.proc import (output);
 from win.switches import (parse_int_value);

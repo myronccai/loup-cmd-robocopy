@@ -1,5 +1,12 @@
 @mode(host.dual)
 
+# Top level of robocopy: parse the arguments, handle /? and --version,
+# require a source and a destination, run the job and return its exit bit
+# mask.
+#
+# Runtime: host.dual. Compiled into the native binary build/robocopy by `make
+# build`; `loup run source/main.loup` interprets the same code.
+
 from appinfo import (EXIT_IN_SYNC, EXIT_FATAL);
 from cli.args import (parse_args, MSG_NO_DEST);
 from cli.usage import (usage, version_line);

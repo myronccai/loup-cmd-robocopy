@@ -1,7 +1,12 @@
 @mode(host.dual)
 
-# Path helpers xcopy needs beyond win/paths.loup: absolute paths (for /F,
-# /EXCLUDE and the cyclic-copy check) and hidden names.
+# Path helpers beyond win/paths.loup: the current directory, absolute paths
+# and containment, hidden names. (The same code as loup-cmd-xcopy's module;
+# robocopy uses current_dir, absolute_path and is_within.)
+#
+# Runtime: host.dual. Compiled into the native binary build/robocopy by `make
+# build`; `loup run source/main.loup` interprets the same code. current_dir
+# runs `pwd` through io.proc.
 
 from io.proc import (output);
 from win.paths import (fs_path, is_absolute_path, join_path);
