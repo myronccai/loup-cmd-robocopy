@@ -91,7 +91,12 @@ copied), 2 (extra files or directories), 4 (mismatches), 8 (failures).
   newer time stamp, so there are no `Newer`, `Older` or `Tweaked` lines and
   no `/XO`, `/MAXAGE`, `/MINAGE`; no attributes, security or timestamps are
   copied (`/COPY`, `/DCOPY`, `/SEC` are not supported), nor `/R`, `/W`
-  retries (a failure is reported once), `/MT`, `/LOG`, `/TEE`, `/V`.
+  retries (a failure is reported once), `/LOG`, `/TEE`, `/V`.
+- `/MT[:n]` (1 to 128 threads, default 8) copies the files on worker
+  threads (`commands/parallel.loup`: each worker takes every n-th copy and
+  records the outcome in a `synchronized` `CopyLog`), then `execute()`
+  prints every line in plan order from those outcomes, so the log does not
+  depend on thread timing as robocopy's does.
 - The header names this program instead of Windows, shows the switches
   given (not robocopy's defaults such as `/R:1000000 /W:30`), and has no
   speed lines; sizes are plain byte counts (no `k`/`m`/`g`); the `Times` row

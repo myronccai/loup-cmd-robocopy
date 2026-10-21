@@ -12,9 +12,11 @@
 # Runtime: host.dual. Compiled into the native binary build/robocopy by `make
 # build`; `loup run source/main.loup` interprets the same code.
 #
-# Structure: Flags; display forms of paths; the checked file-system operations
-# (delete_tree, make_dir, copy_checked); error and counting helpers; execute,
-# one branch per action kind; and remove_moved_dirs for /MOVE.
+# Structure: Flags; display forms of paths; the checked file-system
+# operations (delete_tree, make_dir, copy_checked; commands/parallel.loup
+# runs copy_checked on worker threads for /MT); error and counting
+# helpers; execute, one branch per action kind; and remove_moved_dirs for
+# /MOVE.
 
 from io.fs import (copy, createDir, exists, isDir, isFile, listDir, remove, removeDir);
 from io.proc import (exitCode);
@@ -73,7 +75,7 @@ pub func delete_tree(path: string, depth: int): bool {
         if (listDir(path).len() == 0) {
             try {
                 removeDir(path);
-            } catch (Exception as e) {
+            } catch {
                 return false;
             }
         }
@@ -81,7 +83,7 @@ pub func delete_tree(path: string, depth: int): bool {
     }
     try {
         remove(path);
-    } catch (Exception as e) {
+    } catch {
         return false;
     }
     return !exists(path);
@@ -94,13 +96,14 @@ pub func make_dir(path: string): bool {
     }
     try {
         createDir(path);
-    } catch (Exception as e) {
+    } catch {
         return false;
     }
     return isDir(path);
 }
 
-# Copies a file of `size` bytes; whether the copy is complete.
+# Copies a file of `size` bytes; whether the copy is complete. (Several
+# /MT worker threads call it at once, each for different files.)
 pub func copy_checked(src: string, dst: string, size: int): bool {
     let parent = parent_dir(dst);
     if (parent.len() > 0 and !make_dir(parent)) {
@@ -111,7 +114,7 @@ pub func copy_checked(src: string, dst: string, size: int): bool {
     }
     try {
         copy(src, dst);
-    } catch (Exception as e) {
+    } catch {
         return false;
     }
     return isFile(dst) and readBytes(dst).len() == size;
@@ -127,18 +130,31 @@ func report_error(action: string, display: string): void {
     print_all(error_lines(now_stamp(), 5, action, display, MSG_ACCESS_DENIED));
 }
 
+# Whether the file of action i is copied: by a worker earlier (/MT), or
+# now.
+func copy_done(copied: list[int], i: int, a: Action): bool {
+    if (copied.len() > 0) {
+        return copied[i] == 1;
+    }
+    return copy_checked(a.src, a.dst, a.size);
+}
+
 func count_file(edits stats: Stats, col: int, size: int): void {
     bump(edits: stats, ROW_FILES, col, 1);
     bump(edits: stats, ROW_BYTES, col, size);
 }
 
-# Carries out the actions in order, printing robocopy's lines.
-pub func execute(actions: list[Action], flags: Flags, edits stats: Stats): void {
+# Carries out the actions in order, printing robocopy's lines. `copied`
+# holds, per action, the outcome of a copy already made on worker threads
+# (/MT, see commands/parallel.loup: 1 copied, 2 failed), or is empty, and
+# then execute copies the files itself.
+pub func execute(actions: list[Action], flags: Flags, copied: list[int], edits stats: Stats): void {
     let cwd = flags.cwd;
     let dry = flags.list_only;
     let show_dirs = !flags.no_dir_list;
     let show_files = !flags.no_file_list;
-    for (a in actions) {
+    for (i in 0..actions.len()) {
+        let a = actions[i];
         let kind = a.kind;
         if (kind == A_DIR_NEW) {
             if (show_dirs) {
@@ -193,7 +209,7 @@ pub func execute(actions: list[Action], flags: Flags, edits stats: Stats): void 
             }
             if (dry) {
                 count_file(edits: stats, COL_COPIED, a.size);
-            } else if (copy_checked(a.src, a.dst, a.size)) {
+            } else if (copy_done(copied, i, a)) {
                 if (show_files and !flags.no_progress) {
                     println("100%");
                 }
@@ -220,7 +236,8 @@ pub func remove_moved_dirs(actions: list[Action]): void {
             and listDir(a.src).len() == 0) {
             try {
                 removeDir(a.src);
-            } catch (Exception as e) {
+            } catch {
+                # Left in place, as robocopy leaves it.
             }
         }
     }

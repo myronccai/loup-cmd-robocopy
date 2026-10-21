@@ -9,31 +9,32 @@ from appinfo import (APP_NAME, APP_VERSION);
 
 # The text of `robocopy /?`: the syntax and a short line per supported switch.
 pub func usage(): string {
-    let lines = [
-        "Copies and mirrors directory trees.",
-        "",
-        "ROBOCOPY source destination [file [file]...] [options]",
-        "",
-        "  file      Names or wildcards of the files to copy (default *.*).",
-        "  /S        Copy subdirectories, except empty ones.",
-        "  /E        Copy subdirectories, including empty ones.",
-        "  /PURGE    Delete destination files and directories that are not in the source.",
-        "  /MIR      Mirror a tree (/E plus /PURGE).",
-        "  /MOV      Move files (delete them from the source once copied).",
-        "  /MOVE     Move files and directories.",
-        "  /XF f...  Exclude files matching these names or wildcards.",
-        "  /XD d...  Exclude directories matching these names or paths.",
-        "  /L        List only: change nothing.",
-        "  /NP       No progress percentage.",
-        "  /NFL      No file list.",
-        "  /NDL      No directory list.",
-        "  /NJH      No job header.",
-        "  /NJS      No job summary.",
-        "",
-        "Exit status: a bit mask: 1 files copied, 2 extra entries, 4 mismatches,",
-        "8 failures; 16 a fatal error.",
-    ];
-    return lines.join("\n");
+    let text = """
+    Copies and mirrors directory trees.
+
+    ROBOCOPY source destination [file [file]...] [options]
+
+      file      Names or wildcards of the files to copy (default *.*).
+      /S        Copy subdirectories, except empty ones.
+      /E        Copy subdirectories, including empty ones.
+      /PURGE    Delete destination files and directories that are not in the source.
+      /MIR      Mirror a tree (/E plus /PURGE).
+      /MOV      Move files (delete them from the source once copied).
+      /MOVE     Move files and directories.
+      /XF f...  Exclude files matching these names or wildcards.
+      /XD d...  Exclude directories matching these names or paths.
+      /MT[:n]   Copy with n threads (default 8, at most 128).
+      /L        List only: change nothing.
+      /NP       No progress percentage.
+      /NFL      No file list.
+      /NDL      No directory list.
+      /NJH      No job header.
+      /NJS      No job summary.
+
+    Exit status: a bit mask: 1 files copied, 2 extra entries, 4 mismatches,
+    8 failures; 16 a fatal error.
+    """;
+    return text;
 }
 
 pub func version_line(): string {

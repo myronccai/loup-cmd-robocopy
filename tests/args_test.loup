@@ -65,3 +65,15 @@ func test_flags(): void {
     expect(parse_args(["--version"]).unwrap().version, "--version");
     expectEq(default_options(["a", "b"]).operands.len(), 2, "default_options");
 }
+
+func test_threads(): void {
+    expectEq(parse_args(["s", "d"]).unwrap().threads, 0, "no /MT");
+    expectEq(parse_args(["s", "d", "/MT"]).unwrap().threads, 8, "/MT: 8 threads");
+    expectEq(parse_args(["s", "d", "/mt:4"]).unwrap().threads, 4, "/mt:4");
+    expectEq(parse_args(["s", "d", "/MT:2", "/MT:128"]).unwrap().threads, 128, "the last one counts");
+    expect(parse_args(["s", "d", "/MT:0"]).is_err(), "at least 1");
+    expect(parse_args(["s", "d", "/MT:129"]).is_err(), "at most 128");
+    expect(parse_args(["s", "d", "/MT:x"]).unwrap_err() == msg_invalid_parameter(3, "/MT:x"), "not a number");
+    let opts = default_options(["s", "d"]) with (subdirs = true, threads = 16);
+    expect(option_words(opts).join(" ") == "/S /MT:16", "on the Options line");
+}

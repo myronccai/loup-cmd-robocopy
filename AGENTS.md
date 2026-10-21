@@ -36,9 +36,10 @@ mistakes. Load those only as needed.
 │   ├── commands/
 │   │   ├── plan.loup            # struct Action, plan(): the sync planner (writes nothing)
 │   │   ├── execute.loup         # execute(): copies, purges, moves, counts; delete_tree(), copy_checked()
+│   │   ├── parallel.loup        # /MT: copy_all() on Thread.spawn workers, synchronized class CopyLog
 │   │   ├── report.loup          # struct Stats, header_lines(), dir_line(), file_line(), summary_lines()
 │   │   ├── robocopy.loup        # run_robocopy(), exit_bits()
-│   │   ├── clock.loup           # now_long(), now_stamp(), now_seconds() via `date`; format_elapsed()
+│   │   ├── clock.loup           # now_long(), now_stamp() via `date`; format_elapsed(Duration)
 │   │   └── fspaths.loup         # current_dir() via `pwd`, absolute_path(), is_within()
 │   └── win/                     # shared Windows code (a copy; see below)
 │       ├── switches.loup        # cmd switch parser: /S -s /A:H /AH /T 10 /S/Q /? --

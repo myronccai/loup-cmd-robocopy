@@ -48,7 +48,9 @@ pub func row_total(row: list[int]): int {
 }
 
 # (Both copy `text` before growing it: in native builds, reassigning a var
-# that still shares a string literal argument can free the literal.)
+# that still shares a string literal argument can free the literal. The
+# library's core.string_utils.padLeft does not, and crashes here natively
+# when given summary_lines' `elapsed` parameter.)
 pub func lpad(text: string, width: int): string {
     var out = "" + text;
     while (out.len() < width) {

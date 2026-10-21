@@ -16,6 +16,8 @@ from commands.execute import (delete_tree, make_dir, copy_checked, dir_display);
 from commands.report import (new_stats, bump, ROW_FILES, ROW_DIRS, COL_COPIED, COL_EXTRAS,
     COL_FAILED, COL_MISMATCH);
 from commands.robocopy import (exit_bits);
+from commands.parallel import (copy_all, COPIED, COPY_FAILED, NOT_A_COPY);
+from commands.plan import (plan);
 
 const ROOT: string = "build/tmp/robocopy_run";
 
@@ -92,5 +94,60 @@ func test_helpers(): void {
     expect(!exists(ROOT + "/made"), "gone");
     expectEq(dir_display("a/b", "/w"), "\\w\\a\\b\\", "display");
     expectEq(dir_display("/", "/w"), "\\", "the root");
+    removeDir(ROOT);
+}
+
+# A tree of 30 files in 3 directories, for the /MT runs.
+func many_files(root: string): void {
+    for (d in ["", "/x", "/x/y"]) {
+        createDir(root + d);
+        for (k in 0..10) {
+            writeText(root + d + "/f" + str(k) + ".txt", "file " + str(k) + d);
+        }
+    }
+}
+
+func test_threads_copy_like_one(): void {
+    if (isDir(ROOT)) {
+        removeDir(ROOT);
+    }
+    many_files(ROOT + "/src");
+    expectEq(run([ROOT + "/src", ROOT + "/one", "/S", "/NJH", "/NJS", "/NP"]), BIT_COPIED, "one thread");
+    expectEq(run([ROOT + "/src", ROOT + "/four", "/S", "/MT:4", "/NJH", "/NJS", "/NP"]), BIT_COPIED, "/MT:4");
+    expectEq(run([ROOT + "/src", ROOT + "/many", "/S", "/MT:64", "/NJH", "/NJS", "/NP"]), BIT_COPIED,
+        "more threads than files");
+    for (d in ["", "/x", "/x/y"]) {
+        for (k in 0..10) {
+            let name = d + "/f" + str(k) + ".txt";
+            let want = readText(ROOT + "/src" + name);
+            expect(readText(ROOT + "/four" + name) == want and readText(ROOT + "/many" + name) == want, name);
+        }
+    }
+    expectEq(run([ROOT + "/src", ROOT + "/four", "/S", "/MT:4", "/NJH"]), EXIT_IN_SYNC, "nothing left to copy");
+    expectEq(run([ROOT + "/src", ROOT + "/moved", "/S", "/MOV", "/MT", "/NJH", "/NP"]), BIT_COPIED, "/MOV /MT");
+    expect(!exists(ROOT + "/src/x/y/f9.txt") and isFile(ROOT + "/moved/x/y/f9.txt"), "moved");
+    removeDir(ROOT);
+}
+
+func test_copy_all_outcomes(): void {
+    fixture();
+    createDir(ROOT + "/dst/a.txt/in-the-way");
+    writeText(ROOT + "/src/c.txt", "charlie");
+    let actions = plan(ROOT + "/src", ROOT + "/dst", ["*.*"], [], [], false, false, "/");
+    let outcomes = copy_all(actions, 3);
+    expectEq(outcomes.len(), actions.len(), "one outcome per action");
+    var copied = 0;
+    var failed = 0;
+    for (k in 0..actions.len()) {
+        if (outcomes[k] == COPIED) {
+            copied += 1;
+        } else if (outcomes[k] == COPY_FAILED) {
+            failed += 1;
+        }
+    }
+    expectEq(copied, 1, "c.txt");
+    expectEq(outcomes[0], NOT_A_COPY, "the directory itself");
+    expect(readText(ROOT + "/dst/c.txt") == "charlie", "copied");
+    expectEq(failed, 0, "a.txt is a mismatch, not a copy");
     removeDir(ROOT);
 }

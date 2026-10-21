@@ -133,6 +133,7 @@ help=$(printf '%s\n' \
 '  /MOVE     Move files and directories.' \
 '  /XF f...  Exclude files matching these names or wildcards.' \
 '  /XD d...  Exclude directories matching these names or paths.' \
+'  /MT[:n]   Copy with n threads (default 8, at most 128).' \
 '  /L        List only: change nothing.' \
 '  /NP       No progress percentage.' \
 '  /NFL      No file list.' \
@@ -148,6 +149,8 @@ check_both "no arguments"            16 "$help" ''
 check_both "no destination"          16 '' $'ERROR : No Destination Directory Specified.\n' src
 check_both "invalid parameter"       16 '' $'ERROR : Invalid Parameter #3 : "/ZZ"\n' src dst /ZZ
 check_both "empty /XF"               16 '' $'ERROR : Invalid Parameter #4 : "/XF"\n' src dst /S /XF
+check_both "/MT:0"                   16 '' $'ERROR : Invalid Parameter #3 : "/MT:0"\n' src dst /MT:0
+check_both "/MT:129"                 16 '' $'ERROR : Invalid Parameter #4 : "/MT:129"\n' src dst /S /MT:129
 
 # A first copy: the job header, every directory and file, the summary.
 want=$(t <<'END'
@@ -197,6 +200,14 @@ END
 check_norm "first copy /E"           1 "$want"                  src dst /E
 check_tree "first copy tree"         dst $'a.txt\nb.log\nc.tmp\nempty\nobj\nobj/o.txt\nsub\nsub/c.txt\nsub/deep\nsub/deep/d.txt'
 cmp -s src/sub/deep/d.txt dst/sub/deep/d.txt && pass=$((pass + 1)) || { fail=$((fail + 1)); echo "FAIL: content"; }
+
+# /MT: worker threads copy the files, the lines come in the same order;
+# only Dest and the Options line differ.
+want_mt=${want/'<W>\dst\'/'<W>\dmt\'}
+want_mt=${want_mt/'Options : *.* /S /E'/'Options : *.* /S /E /MT:3'}
+check_norm "/MT:3 like one thread"   1 "$want_mt"               src dmt /E /MT:3
+check_tree "/MT:3 tree"              dmt $'a.txt\nb.log\nc.tmp\nempty\nobj\nobj/o.txt\nsub\nsub/c.txt\nsub/deep\nsub/deep/d.txt'
+cmp -s src/sub/deep/d.txt dmt/sub/deep/d.txt && pass=$((pass + 1)) || { fail=$((fail + 1)); echo "FAIL: /MT content"; }
 
 summary_tail() {
     printf '%s\n' '' "------------------------------------------------------------------------------" '' \

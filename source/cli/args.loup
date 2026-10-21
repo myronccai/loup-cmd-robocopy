@@ -2,35 +2,41 @@
 
 # Command-line parsing for robocopy: `robocopy SOURCE DEST [FILE...]
 # [switches]`, with the shared Windows switch parser (win/switches.loup).
-# /XF and /XD take every following argument up to the next switch.
+# /XF and /XD take every following argument up to the next switch;
+# /MT[:n] takes an optional thread count.
 #
 # Runtime: host.dual. Compiled into the native binary build/robocopy by `make
 # build`; `loup run source/main.loup` interprets the same code.
 
-from win.switches import (SwitchArgs, SwitchSpec, flag, list_value, parse_switches, has_switch,
-    switch_values);
+from win.switches import (SwitchArgs, SwitchSpec, flag, list_value, optional_value, parse_switches,
+    has_switch, last_switch, parse_int_value, switch_values);
 
 pub const MSG_NO_DEST: string = "ERROR : No Destination Directory Specified.";
 
-# Fields are `var` so that tests can adjust default_options().
+# /MT without a count uses 8 threads; robocopy accepts 1 to 128.
+pub const DEFAULT_THREADS: int = 8;
+pub const MAX_THREADS: int = 128;
+
+# Tests vary default_options() with `with` copies.
 pub struct Options {
-    pub var help: bool;
-    pub var version: bool;
-    pub var subdirs: bool;          # /S, /E, /MIR
-    pub var empty_dirs: bool;       # /E, /MIR
-    pub var purge: bool;            # /PURGE, /MIR
-    pub var mirror: bool;           # /MIR (for the Options line)
-    pub var list_only: bool;        # /L
-    pub var move_files: bool;       # /MOV, /MOVE
-    pub var move_dirs: bool;        # /MOVE
-    pub var no_progress: bool;      # /NP
-    pub var no_header: bool;        # /NJH
-    pub var no_summary: bool;       # /NJS
-    pub var no_file_list: bool;     # /NFL
-    pub var no_dir_list: bool;      # /NDL
-    pub var exclude_files: list[string];  # /XF
-    pub var exclude_dirs: list[string];   # /XD
-    pub var operands: list[string]; # SOURCE DEST FILE...
+    pub help: bool;
+    pub version: bool;
+    pub subdirs: bool;          # /S, /E, /MIR
+    pub empty_dirs: bool;       # /E, /MIR
+    pub purge: bool;            # /PURGE, /MIR
+    pub mirror: bool;           # /MIR (for the Options line)
+    pub list_only: bool;        # /L
+    pub move_files: bool;       # /MOV, /MOVE
+    pub move_dirs: bool;        # /MOVE
+    pub no_progress: bool;      # /NP
+    pub no_header: bool;        # /NJH
+    pub no_summary: bool;       # /NJS
+    pub no_file_list: bool;     # /NFL
+    pub no_dir_list: bool;      # /NDL
+    pub threads: int;           # /MT[:n]; 0 without /MT
+    pub exclude_files: list[string];  # /XF
+    pub exclude_dirs: list[string];   # /XD
+    pub operands: list[string]; # SOURCE DEST FILE...
 }
 
 # Options with robocopy's defaults; for tests.
@@ -39,7 +45,8 @@ pub func default_options(operands: list[string]): Options {
     return Options(help = false, version = false, subdirs = false, empty_dirs = false,
         purge = false, mirror = false, list_only = false, move_files = false, move_dirs = false,
         no_progress = false, no_header = false, no_summary = false, no_file_list = false,
-        no_dir_list = false, exclude_files = none, exclude_dirs = none, operands = operands);
+        no_dir_list = false, threads = 0, exclude_files = none, exclude_dirs = none,
+        operands = operands);
 }
 
 # The switches robocopy declares.
@@ -47,7 +54,7 @@ pub func robocopy_switches(): list[SwitchSpec] {
     return [
         flag("S"), flag("E"), flag("MIR"), flag("PURGE"), flag("L"), flag("MOV"), flag("MOVE"),
         flag("NP"), flag("NJH"), flag("NJS"), flag("NFL"), flag("NDL"),
-        list_value("XF"), list_value("XD"),
+        list_value("XF"), list_value("XD"), optional_value("MT", "0123456789"),
     ];
 }
 
@@ -88,6 +95,20 @@ pub func parse_args(argv: list[string]): Result[Options, string] {
             return Err(msg_invalid_parameter(position_of(argv, sw.token), sw.token));
         }
     }
+    # /MT[:n]: the last one counts; a count outside 1..128 is invalid.
+    var threads = 0;
+    match last_switch(parsed, "MT") {
+        Some(sw) => {
+            threads = DEFAULT_THREADS;
+            if (sw.has_value) {
+                threads = parse_int_value(sw.value) ?? 0;
+            }
+            if (threads < 1 or threads > MAX_THREADS or sw.value.startsWith("+")) {
+                return Err(msg_invalid_parameter(position_of(argv, sw.token), sw.token));
+            }
+        },
+        None => {},
+    }
     let mirror = has_switch(parsed, "MIR");
     return Ok(Options(
         help = parsed.help,
@@ -104,6 +125,7 @@ pub func parse_args(argv: list[string]): Result[Options, string] {
         no_summary = has_switch(parsed, "NJS"),
         no_file_list = has_switch(parsed, "NFL"),
         no_dir_list = has_switch(parsed, "NDL"),
+        threads = threads,
         exclude_files = switch_values(parsed, "XF"),
         exclude_dirs = switch_values(parsed, "XD"),
         operands = parsed.operands,
@@ -135,6 +157,7 @@ pub func option_words(opts: Options): list[string] {
     }
     if (opts.purge) { out.push("/PURGE"); }
     if (opts.mirror) { out.push("/MIR"); }
+    if (opts.threads > 0) { out.push("/MT:" + str(opts.threads)); }
     if (opts.no_file_list) { out.push("/NFL"); }
     if (opts.no_dir_list) { out.push("/NDL"); }
     if (opts.no_progress) { out.push("/NP"); }

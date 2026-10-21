@@ -1,14 +1,16 @@
 @mode(host.dual)
 
-# Wall-clock times for the job header (`Started :`, `Ended :`), the
-# `Times :` row and the time stamps of error lines. They come from the
-# `date` command through io.proc, which works the same in every Loup lane.
+# Times for the job header (`Started :`, `Ended :`), the `Times :` row
+# and the time stamps of error lines. The local date and time come from the
+# `date` command through io.proc, which works the same in every Loup lane
+# (core.datetime knows only UTC); the elapsed time is a core.time.Duration
+# measured with Instant.now().
 #
 # Runtime: host.dual. Compiled into the native binary build/robocopy by `make
 # build`; `loup run source/main.loup` interprets the same code.
 
 from io.proc import (output);
-from win.switches import (parse_int_value);
+from core.time import (Duration);
 
 func run_date(format: string): string {
     var text = output(["date", format]);
@@ -28,17 +30,12 @@ pub func now_stamp(): string {
     return run_date("+%Y/%m/%d %H:%M:%S");
 }
 
-# Seconds since 1970 (0 if unknown).
-pub func now_seconds(): int {
-    return parse_int_value(run_date("+%s")) ?? 0;
-}
-
 func two_digits(n: int): string {
     return if (n < 10) { "0" + str(n) } else { str(n) };
 }
 
 # An elapsed time as robocopy shows it: `H:MM:SS`.
-pub func format_elapsed(seconds: int): string {
-    let s = if (seconds < 0) { 0 } else { seconds };
+pub func format_elapsed(elapsed: Duration): string {
+    let s = if (elapsed.isNegative()) { 0 } else { elapsed.secondsPart() };
     return str(s / 3600) + ":" + two_digits((s / 60) % 60) + ":" + two_digits(s % 60);
 }

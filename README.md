@@ -159,6 +159,7 @@ exit 0
 | `/MOVE` | Move files and directories: also remove source directories left empty (not the source root) |
 | `/XF name ...` | Exclude files by name or wildcard (neither copied nor purged) |
 | `/XD name ...` | Exclude directories by name, wildcard or path |
+| `/MT[:n]` | Copy with `n` threads (default 8, 1 to 128) |
 | `/L` | List only: report and count everything, change nothing |
 | `/NP` | No `100%` progress line after each copied file |
 | `/NFL`, `/NDL` | No file lines, no directory lines |
@@ -184,7 +185,11 @@ extras). `16`: a fatal error (bad parameter, no source), nothing was done.
   lines, no `/XO`, `/MAXAGE` or `/MINAGE`, and no attributes, times or
   security are copied (`/COPY`, `/DCOPY`, `/SEC` are not supported).
 - No retries (`/R`, `/W`): a failure is reported once, as with `/R:0`. No
-  `/MT`, `/LOG`, `/TEE`, `/V`, `/Z`, `/B`.
+  `/LOG`, `/TEE`, `/V`, `/Z`, `/B`.
+- `/MT[:n]` copies the files on `n` threads first, then prints every line
+  in plan order, so the log is the same as without `/MT` (robocopy prints
+  lines as its threads finish); `/MT` shows on the Options line as
+  `/MT:n`.
 - The header names this program instead of Windows and shows the switches
   given rather than robocopy's defaults; there are no speed lines; sizes
   are plain byte counts (no `k`/`m`/`g`); the `Times` row shows the job's
@@ -213,6 +218,7 @@ source/cli/usage.loup            # /? and --version text
 source/cli/app.loup              # run(): parse, fatal errors, dispatch
 source/commands/plan.loup        # the sync planner: actions for every directory and file
 source/commands/execute.loup     # carries the plan out: copies, purges, moves, counts
+source/commands/parallel.loup    # /MT: copies on worker threads, a synchronized log
 source/commands/report.loup      # header, log lines, summary table, error lines
 source/commands/robocopy.loup    # run_robocopy: header, plan, execute, summary, exit bits
 source/commands/clock.loup       # times for the header and the summary

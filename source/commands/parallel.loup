@@ -1,0 +1,91 @@
+@mode(host.dual)
+
+# robocopy /MT[:n]: copies the files of a plan on n worker threads before
+# commands/execute.loup reports the plan. Worker k copies jobs k, k + n,
+# k + 2n, ... and records each outcome in a CopyLog; once every worker has
+# been joined, execute() prints the lines in plan order from the log, so
+# the output is the same with or without /MT.
+#
+# Runtime: host.dual. Compiled into the native binary build/robocopy by `make
+# build`; `loup run source/main.loup` interprets the same code. The threads
+# are OS threads (Thread.spawn) in the native binary.
+#
+# Structure: the outcome codes; CopyLog, the synchronized record the
+# workers share; copy_worker, one thread's share of the jobs; and copy_all,
+# which collects the jobs from the plan, starts the workers, joins them and
+# maps the outcomes back to the plan.
+#
+# Native constraints shape it: the workers get plain lists of strings and
+# ints (not the plan's Action structs), the thread lambdas return nothing,
+# and the only shared mutable state is the synchronized CopyLog.
+
+from commands.execute import (copy_checked);
+from commands.plan import (Action, A_FILE_NEW, A_FILE_CHANGED);
+
+# What copy_all reports for each action of the plan.
+pub const NOT_A_COPY: int = 0;
+pub const COPIED: int = 1;
+pub const COPY_FAILED: int = 2;
+
+# The outcome of every job. A synchronized class runs its modifier methods
+# one at a time per instance, so workers may record concurrently.
+pub synchronized class CopyLog implements Sendable {
+    var outcomes: list[int];
+
+    new(jobs: int) {
+        var none: list[int] = [];
+        for (_ in 0..jobs) {
+            none.push(NOT_A_COPY);
+        }
+        this.outcomes = none;
+    }
+
+    pub modifier func record(job: int, ok: bool): void {
+        this.outcomes[job] = if (ok) { COPIED } else { COPY_FAILED };
+    }
+
+    pub modifier func outcome(job: int): int {
+        return this.outcomes[job];
+    }
+}
+
+# One worker: copies jobs first, first + step, ... and records each.
+func copy_worker(srcs: list[string], dsts: list[string], sizes: list[int], first: int, step: int,
+    log: CopyLog): void {
+    for (var job = first; job < srcs.len(); job += step) {
+        log.record(job, copy_checked(srcs[job], dsts[job], sizes[job]));
+    }
+}
+
+# Copies the files of every NEW and CHANGED action on up to `threads`
+# threads and returns, per action, COPIED, COPY_FAILED or NOT_A_COPY.
+pub func copy_all(actions: list[Action], threads: int): list[int] {
+    var srcs: list[string] = [];
+    var dsts: list[string] = [];
+    var sizes: list[int] = [];
+    var job_of: list[int] = [];
+    for (a in actions) {
+        if (a.kind == A_FILE_NEW or a.kind == A_FILE_CHANGED) {
+            job_of.push(srcs.len());
+            srcs.push(a.src);
+            dsts.push(a.dst);
+            sizes.push(a.size);
+        } else {
+            job_of.push(-1);
+        }
+    }
+    let log = CopyLog(srcs.len());
+    let n = if (threads < srcs.len()) { threads } else { srcs.len() };
+    var workers: list[Thread] = [];
+    for (k in 0..n) {
+        workers.push(Thread.spawn(func(): void { copy_worker(srcs, dsts, sizes, k, n, log); }));
+    }
+    for (w in workers) {
+        w.join();
+    }
+    var out: list[int] = [];
+    for (job in job_of) {
+        out.push(if (job < 0) { NOT_A_COPY } else { log.outcome(job) });
+    }
+    return out;
+}

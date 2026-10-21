@@ -1,15 +1,14 @@
 @mode(host.dual)
 
 # Path helpers beyond win/paths.loup: the current directory, absolute paths
-# and containment, hidden names. (The same code as loup-cmd-xcopy's module;
-# robocopy uses current_dir, absolute_path and is_within.)
+# and containment.
 #
 # Runtime: host.dual. Compiled into the native binary build/robocopy by `make
 # build`; `loup run source/main.loup` interprets the same code. current_dir
 # runs `pwd` through io.proc.
 
 from io.proc import (output);
-from win.paths import (fs_path, is_absolute_path, join_path);
+from win.paths import (fs_path, is_absolute_path);
 
 # The current directory, absolute, in fs form ("" if it cannot be found).
 # Loup 1.26.0 has no cwd() in native builds, so this asks `pwd`, which also
@@ -52,22 +51,4 @@ pub func is_within(inner: string, outer: string): bool {
         return true;
     }
     return inner == outer or inner.startsWith(outer + "/");
-}
-
-# Whether a name counts as hidden: Linux's dot-files stand in for Windows'
-# hidden attribute.
-pub func is_hidden_name(name: string): bool {
-    return name.startsWith(".") and name != "." and name != "..";
-}
-
-# `rel` below `base` (fs form); either may be "" (the current directory, or
-# the base itself).
-pub func under(base: string, rel: string): string {
-    if (rel.len() == 0) {
-        return base;
-    }
-    if (base.len() == 0) {
-        return fs_path(rel);
-    }
-    return join_path(base, rel);
 }
